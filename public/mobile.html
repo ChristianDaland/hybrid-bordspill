@@ -7,10 +7,10 @@
   <script src="/socket.io/socket.io.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; touch-action: none; }
-    body { background: #18181c; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+    body { background: #18181c; color: #fff; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
     .card { background: #24242c; padding: 20px; border-radius: 12px; width: 90%; max-width: 360px; text-align: center; }
     input[type=text] { width: 100%; padding: 12px; margin: 12px 0; border-radius: 6px; border: 1px solid #444; background: #121214; color: #fff; font-size: 1rem; }
-    button { width: 100%; padding: 12px; background: #4a90e2; border: none; border-radius: 6px; color: #fff; font-size: 1rem; font-weight: bold; }
+    button { width: 100%; padding: 12px; background: #4a90e2; border: none; border-radius: 6px; color: #fff; font-size: 1rem; font-weight: bold; cursor: pointer; }
     .hidden { display: none; }
     
     #slingshot-zone {
@@ -21,7 +21,7 @@
       width: 60px; height: 60px; border-radius: 50%; background: #e74c3c;
       border: 3px solid #fff; position: absolute; box-shadow: 0 4px 10px rgba(0,0,0,0.5); cursor: pointer;
     }
-    .turn-indicator { padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 10px; }
+    .turn-indicator { padding: 10px; border-radius: 6px; font-weight: bold; margin-bottom: 10px; font-size: 0.95rem; }
   </style>
 </head>
 <body>
@@ -86,7 +86,7 @@
       }
     });
 
-    // --- BERØRINGS / DRAG CONTROL ---
+    // BERØRINGS- OG DRAG-KONTROLL
     let startX = 0, startY = 0, isDragging = false;
 
     function onStart(e) {
@@ -103,7 +103,6 @@
       const dx = touch.clientX - startX;
       const dy = touch.clientY - startY;
 
-      // Begrens bevegelse innenfor sonen
       const dist = Math.hypot(dx, dy);
       if (dist < 90) {
         handle.style.transform = `translate(${dx}px, ${dy}px)`;
@@ -121,11 +120,19 @@
         const dx = parseFloat(matches[1]);
         const dy = parseFloat(matches[2]);
 
-        // Skyt kun om man dro bakover (nedover på mobilen)
-        if (dy > 15) {
-          // Send hastighet i forhold til hvor hardt man dro (negativ Y = fremover på bordet)
-          const vx = -dx * 0.08;
-          const vy = -dy * 0.12; 
+        if (dy > 10) {
+          // Lavere hastighetsmultiplikatorer for bedre presisjon
+          let vx = -dx * 0.025;
+          let vy = -dy * 0.035;
+
+          // Maksimal hastighetssperre
+          const maxSpeed = 3.5;
+          const currentSpeed = Math.hypot(vx, vy);
+          if (currentSpeed > maxSpeed) {
+            vx = (vx / currentSpeed) * maxSpeed;
+            vy = (vy / currentSpeed) * maxSpeed;
+          }
+
           socket.emit('shootPuck', { vx, vy });
         }
       }
