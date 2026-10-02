@@ -246,7 +246,7 @@
       if (hit) {
         draggedObstacle = hit;
       } else {
-        const newObs = { x: coords.xPercent, y: coords.yPercent, radius: 40, label: 'Glass' };
+        const newObs = { x: coords.xPercent, y: coords.yPercent, radius: 40 };
         boardConfig.obstacles.push(newObs);
         draggedObstacle = newObs;
       }
@@ -585,6 +585,7 @@
         ctx.fillText(z.name, canvas.width / 2, z.y + zoneH / 1.5);
       });
 
+      // TEGN DUSED NEDBILDET AV HINDRINGER (UTEN TEKST)
       boardConfig.obstacles.forEach(obs => {
         const ox = (obs.x / 100) * canvas.width;
         const oy = (obs.y / 100) * canvas.height;
@@ -593,25 +594,21 @@
         ctx.arc(ox, oy, obs.radius, 0, Math.PI * 2);
 
         if (isEditMode) {
-          ctx.fillStyle = (obs === hoveredObstacle) ? 'rgba(241, 196, 15, 0.6)' : 'rgba(231, 76, 60, 0.5)';
-          ctx.strokeStyle = (obs === hoveredObstacle) ? '#f39c12' : '#e74c3c';
-          ctx.lineWidth = 3;
-          ctx.setLineDash([6, 4]);
+          ctx.fillStyle = (obs === hoveredObstacle) ? 'rgba(241, 196, 15, 0.35)' : 'rgba(255, 255, 255, 0.25)';
+          ctx.strokeStyle = (obs === hoveredObstacle) ? '#f39c12' : 'rgba(255, 255, 255, 0.6)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
         } else {
-          ctx.fillStyle = 'rgba(231, 76, 60, 0.6)';
-          ctx.strokeStyle = '#e74c3c';
-          ctx.lineWidth = 3;
+          // Dus og nøytral sirkel uten tekst
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+          ctx.lineWidth = 1.5;
           ctx.setLineDash([]);
         }
 
         ctx.fill();
         ctx.stroke();
         ctx.setLineDash([]);
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('GLASS', ox, oy + 4);
       });
 
       pucks.forEach(p => {
