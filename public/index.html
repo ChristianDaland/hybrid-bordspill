@@ -93,6 +93,64 @@
     let draggedObstacle = null;
     let hoveredObstacle = null;
 
+    // --- LYDMOTOR (WEB AUDIO API) ---
+    let audioCtx = null;
+
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    // Lyd for treff mot glass (Lys pling)
+    function playGlassSound() {
+      initAudio();
+      if (!audioCtx) return;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 tone
+      osc.frequency.exponentialRampToValueAtTime(1760, audioCtx.currentTime + 0.1);
+
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.35);
+    }
+
+    // Lyd for treff mellom to baller (Klikk)
+    function playBallClickSound() {
+      initAudio();
+      if (!audioCtx) return;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.05);
+
+      gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+
+    window.addEventListener('click', initAudio, { once: true });
+
     function resizeCanvas() {
       const container = document.getElementById('board-container');
       if (!container) return;
@@ -119,7 +177,6 @@
       socket.emit('updateBoardConfig', { widthRatio: e.target.value });
     });
 
-    // --- MUSEDRA OG SCROLL FOR HINDRINGER ---
     function getCanvasCoords(e) {
       const rect = canvas.getBoundingClientRect();
       const xPx = e.clientX - rect.left;
@@ -137,11 +194,12 @@
         const ox = (obs.x / 100) * canvas.width;
         const oy = (obs.y / 100) * canvas.height;
         const dist = Math.hypot(xPx - ox, yPx - oy);
-        return dist <= obs.radius + 10; // Liten margin for enklere treff
+        return dist <= obs.radius + 10;
       });
     }
 
     canvas.addEventListener('mousedown', (e) => {
+      initAudio();
       if (!isEditMode) return;
       const coords = getCanvasCoords(e);
       const hit = findObstacleAt(coords.xPx, coords.yPx);
@@ -149,7 +207,6 @@
       if (hit) {
         draggedObstacle = hit;
       } else {
-        // Ny sirkel
         const newObs = {
           x: coords.xPercent,
           y: coords.yPercent,
@@ -177,7 +234,6 @@
       draggedObstacle = null;
     });
 
-    // Juster størrelse med mus-scroll
     canvas.addEventListener('wheel', (e) => {
       if (!isEditMode) return;
       const coords = getCanvasCoords(e);
@@ -190,7 +246,6 @@
       }
     }, { passive: false });
 
-    // Dobbelklikk for å fjerne enkelt-sirkel
     canvas.addEventListener('dblclick', (e) => {
       if (!isEditMode) return;
       const coords = getCanvasCoords(e);
@@ -200,8 +255,8 @@
       }
     });
 
-    // --- MODUS-KONTROLL OG KNAPPER ---
     saveBtn.addEventListener('click', () => {
+      initAudio();
       isEditMode = false;
       modeBadge.textContent = "Spillmodus (Låst)";
       modeBadge.className = "mode-badge mode-play";
@@ -211,6 +266,7 @@
     });
 
     editBtn.addEventListener('click', () => {
+      initAudio();
       isEditMode = true;
       modeBadge.textContent = "Kalibreringsmodus";
       modeBadge.className = "mode-badge mode-edit";
@@ -225,7 +281,6 @@
 
     resetBtn.addEventListener('click', () => socket.emit('resetGame'));
 
-    // --- SOCKET EVENTS ---
     socket.on('boardConfigUpdate', (cfg) => {
       boardConfig = cfg;
       wSlider.value = cfg.widthRatio;
@@ -238,6 +293,8 @@
       puck.py = (puck.y / 100) * canvas.height;
       puck.vxPx = (puck.vx / 100) * canvas.width;
       puck.vyPx = (puck.vy / 100) * canvas.height;
+      puck.lastGlassHit = 0;
+      puck.lastPuckHit = 0;
       pucks.push(puck);
     });
 
@@ -250,6 +307,8 @@
           p.vxPx = ((p.vx || 0) / 100) * canvas.width;
           p.vyPx = ((p.vy || 0) / 100) * canvas.height;
         }
+        p.lastGlassHit = 0;
+        p.lastPuckHit = 0;
       });
     });
 
@@ -270,6 +329,7 @@
 
     function updatePhysics() {
       const friction = 0.988;
+      const now = Date.now();
 
       pucks.forEach(p => {
         if (Math.abs(p.vxPx) < 0.05 && Math.abs(p.vyPx) < 0.05) {
@@ -282,6 +342,7 @@
           p.vyPx *= friction;
         }
 
+        // Kollisjon med hindringer (Glass)
         boardConfig.obstacles.forEach(obs => {
           const obsX = (obs.x / 100) * canvas.width;
           const obsY = (obs.y / 100) * canvas.height;
@@ -294,10 +355,17 @@
             const speed = Math.hypot(p.vxPx, p.vyPx);
             p.vxPx = Math.cos(angle) * speed * 0.7;
             p.vyPx = Math.sin(angle) * speed * 0.7;
+
+            // Spill av plass-lyd om det er over 120ms siden forrige treff
+            if (!p.lastGlassHit || now - p.lastGlassHit > 120) {
+              playGlassSound();
+              p.lastGlassHit = now;
+            }
           }
         });
       });
 
+      // Kollisjon mellom pucker
       for (let i = 0; i < pucks.length; i++) {
         for (let j = i + 1; j < pucks.length; j++) {
           const p1 = pucks[i];
@@ -326,6 +394,13 @@
             p1.vyPx -= p * ny * 0.9;
             p2.vxPx += p * nx * 0.9;
             p2.vyPx += p * ny * 0.9;
+
+            // Spill av ball-klikk lyd
+            if ((!p1.lastPuckHit || now - p1.lastPuckHit > 100) && (!p2.lastPuckHit || now - p2.lastPuckHit > 100)) {
+              playBallClickSound();
+              p1.lastPuckHit = now;
+              p2.lastPuckHit = now;
+            }
           }
         }
       }
@@ -363,7 +438,6 @@
         ctx.fillText(z.name, canvas.width / 2, z.y + zoneH / 1.5);
       });
 
-      // TEGN HINDRINGER (GLASS)
       boardConfig.obstacles.forEach(obs => {
         const ox = (obs.x / 100) * canvas.width;
         const oy = (obs.y / 100) * canvas.height;
@@ -375,7 +449,7 @@
           ctx.fillStyle = (obs === hoveredObstacle) ? 'rgba(241, 196, 15, 0.6)' : 'rgba(231, 76, 60, 0.5)';
           ctx.strokeStyle = (obs === hoveredObstacle) ? '#f39c12' : '#e74c3c';
           ctx.lineWidth = 3;
-          ctx.setLineDash([6, 4]); // Stiplet linje i redigeringsmodus
+          ctx.setLineDash([6, 4]);
         } else {
           ctx.fillStyle = 'rgba(231, 76, 60, 0.6)';
           ctx.strokeStyle = '#e74c3c';
@@ -393,7 +467,6 @@
         ctx.fillText('GLASS', ox, oy + 4);
       });
 
-      // TEGN PUCKER
       pucks.forEach(p => {
         ctx.beginPath();
         ctx.arc(p.px, p.py, PUCK_RADIUS, 0, Math.PI * 2);
