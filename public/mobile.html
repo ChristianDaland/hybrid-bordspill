@@ -2,98 +2,144 @@
 <html lang="no">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Spillerkontroll - Hybrid Bordspill</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Shuffleboard - Mobil</title>
   <script src="/socket.io/socket.io.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: #18181c;
-      color: #fff;
-      font-family: sans-serif;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-    }
-    .card {
-      background: #24242c;
-      padding: 24px;
-      border-radius: 12px;
-      width: 100%;
-      max-width: 400px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      text-align: center;
-    }
-    input[type=text] {
-      width: 100%;
-      padding: 12px;
-      margin: 16px 0;
-      border-radius: 6px;
-      border: 1px solid #444;
-      background: #121214;
-      color: #fff;
-      font-size: 1rem;
-    }
-    button {
-      width: 100%;
-      padding: 12px;
-      background: #4a90e2;
-      border: none;
-      border-radius: 6px;
-      color: #fff;
-      font-size: 1rem;
-      font-weight: bold;
-      cursor: pointer;
-    }
-    button:hover { background: #357abd; }
+    * { box-sizing: border-box; margin: 0; padding: 0; touch-action: none; }
+    body { background: #18181c; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+    .card { background: #24242c; padding: 20px; border-radius: 12px; width: 90%; max-width: 360px; text-align: center; }
+    input[type=text] { width: 100%; padding: 12px; margin: 12px 0; border-radius: 6px; border: 1px solid #444; background: #121214; color: #fff; font-size: 1rem; }
+    button { width: 100%; padding: 12px; background: #4a90e2; border: none; border-radius: 6px; color: #fff; font-size: 1rem; font-weight: bold; }
     .hidden { display: none; }
+    
+    #slingshot-zone {
+      width: 260px; height: 260px; border-radius: 50%; border: 3px dashed #4a90e2;
+      margin: 20px auto; position: relative; display: flex; justify-content: center; align-items: center; background: #18181c;
+    }
+    #puck-handle {
+      width: 60px; height: 60px; border-radius: 50%; background: #e74c3c;
+      border: 3px solid #fff; position: absolute; box-shadow: 0 4px 10px rgba(0,0,0,0.5); cursor: pointer;
+    }
+    .turn-indicator { padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 10px; }
   </style>
 </head>
 <body>
 
   <div id="join-card" class="card">
-    <h2>Bli med i spillet</h2>
+    <h2>Bli med i Shuffleboard</h2>
     <input type="text" id="nameInput" placeholder="Ditt navn">
     <button id="joinBtn">Koble til</button>
   </div>
 
   <div id="game-card" class="card hidden">
-    <h2 id="welcomeMsg">Velkommen!</h2>
-    <p style="margin-top: 10px; color: #888;">Du er koblet til bordet.</p>
+    <h3 id="welcomeMsg">Velkommen!</h3>
+    <div id="turnBadge" class="turn-indicator">Venter på din tur...</div>
+
+    <p style="font-size:0.85em; color:#aaa;">Dra pucken bakover og slipp for å skyte!</p>
+
+    <div id="slingshot-zone">
+      <div id="puck-handle"></div>
+    </div>
   </div>
 
   <script>
     const socket = io();
-    const joinCard = document.getElementById('join-card');
-    const gameCard = document.getElementById('game-card');
-    const nameInput = document.getElementById('nameInput');
-    const joinBtn = document.getElementById('joinBtn');
-    const welcomeMsg = document.getElementById('welcomeMsg');
+    const handle = document.getElementById('puck-handle');
+    const zone = document.getElementById('slingshot-zone');
+    const turnBadge = document.getElementById('turnBadge');
 
     let savedUuid = localStorage.getItem('boardgame_uuid');
     let savedName = localStorage.getItem('boardgame_name');
+    let myUuid = savedUuid;
+    let isMyTurn = false;
+    let myColor = '#e74c3c';
 
-    if (savedUuid) {
-      socket.emit('joinGame', { uuid: savedUuid, name: savedName });
-    }
+    if (savedUuid) socket.emit('joinGame', { uuid: savedUuid, name: savedName });
 
-    joinBtn.addEventListener('click', () => {
-      const name = nameInput.value.trim();
-      if (name) {
-        socket.emit('joinGame', { uuid: savedUuid, name });
+    document.getElementById('joinBtn').addEventListener('click', () => {
+      const name = document.getElementById('nameInput').value.trim();
+      if (name) socket.emit('joinGame', { uuid: savedUuid, name });
+    });
+
+    socket.on('sessionCreated', ({ uuid, name, color }) => {
+      myUuid = uuid;
+      myColor = color;
+      localStorage.setItem('boardgame_uuid', uuid);
+      localStorage.setItem('boardgame_name', name);
+      handle.style.backgroundColor = color;
+      document.getElementById('join-card').classList.add('hidden');
+      document.getElementById('game-card').classList.remove('hidden');
+      document.getElementById('welcomeMsg').textContent = name;
+    });
+
+    socket.on('turnUpdate', ({ activeUuid, name }) => {
+      isMyTurn = (activeUuid === myUuid);
+      if (isMyTurn) {
+        turnBadge.textContent = "DET ER DIN TUR!";
+        turnBadge.style.background = "#2ecc71";
+        turnBadge.style.color = "#000";
+      } else {
+        turnBadge.textContent = `Venter på ${name}...`;
+        turnBadge.style.background = "#333";
+        turnBadge.style.color = "#fff";
       }
     });
 
-    socket.on('sessionCreated', ({ uuid, name }) => {
-      localStorage.setItem('boardgame_uuid', uuid);
-      localStorage.setItem('boardgame_name', name);
-      joinCard.classList.add('hidden');
-      gameCard.classList.remove('hidden');
-      welcomeMsg.textContent = `Klar, ${name}!`;
-    });
+    // --- BERØRINGS / DRAG CONTROL ---
+    let startX = 0, startY = 0, isDragging = false;
+
+    function onStart(e) {
+      if (!isMyTurn) return;
+      isDragging = true;
+      const touch = e.touches ? e.touches[0] : e;
+      startX = touch.clientX;
+      startY = touch.clientY;
+    }
+
+    function onMove(e) {
+      if (!isDragging) return;
+      const touch = e.touches ? e.touches[0] : e;
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+
+      // Begrens bevegelse innenfor sonen
+      const dist = Math.hypot(dx, dy);
+      if (dist < 90) {
+        handle.style.transform = `translate(${dx}px, ${dy}px)`;
+      }
+    }
+
+    function onEnd(e) {
+      if (!isDragging) return;
+      isDragging = false;
+
+      const transform = handle.style.transform;
+      const matches = transform.match(/translate\(([^p]+)px,\s*([^p]+)px\)/);
+
+      if (matches) {
+        const dx = parseFloat(matches[1]);
+        const dy = parseFloat(matches[2]);
+
+        // Skyt kun om man dro bakover (nedover på mobilen)
+        if (dy > 15) {
+          // Send hastighet i forhold til hvor hardt man dro (negativ Y = fremover på bordet)
+          const vx = -dx * 0.08;
+          const vy = -dy * 0.12; 
+          socket.emit('shootPuck', { vx, vy });
+        }
+      }
+
+      handle.style.transform = 'translate(0px, 0px)';
+    }
+
+    handle.addEventListener('touchstart', onStart);
+    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchend', onEnd);
+
+    handle.addEventListener('mousedown', onStart);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
   </script>
 </body>
 </html>

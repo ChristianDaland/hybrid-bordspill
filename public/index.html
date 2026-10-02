@@ -3,130 +3,45 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hybrid Bordspill - Hovedskjerm</title>
+  <title>Hybrid Shuffleboard - Hovedskjerm</title>
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background-color: #121212;
-      color: #ffffff;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      overflow: hidden;
-      display: flex;
-      height: 100vh;
-    }
-    #sidebar {
-      width: 320px;
-      background: #1e1e1e;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      border-right: 2px solid #333;
-      z-index: 10;
-    }
-    #game-board-container {
-      flex: 1;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      background: #000;
-      position: relative;
-    }
-    #game-board {
-      background: #1a2634;
-      border: 4px solid #4a90e2;
-      border-radius: 12px;
-      height: 90vh;
-      transition: width 0.2s ease, height 0.2s ease;
-      position: relative;
-      cursor: crosshair;
-      overflow: hidden;
-    }
-    .qr-box {
-      background: #fff;
-      padding: 10px;
-      border-radius: 8px;
-      display: flex;
-      justify-content: center;
-    }
-    .player-list { list-style: none; margin-top: 5px; }
-    .player-item {
-      padding: 8px 12px;
-      background: #2a2a2a;
-      margin-bottom: 6px;
-      border-radius: 6px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      display: inline-block;
-    }
-    .online { background: #4caf50; }
-    .offline { background: #f44336; }
-    .control-group { display: flex; flex-direction: column; gap: 6px; }
-    input[type=range] { width: 100%; }
-    
-    button {
-      padding: 10px;
-      background: #e74c3c;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-weight: bold;
-      cursor: pointer;
-    }
+    body { background-color: #121212; color: #fff; font-family: sans-serif; overflow: hidden; display: flex; height: 100vh; }
+    #sidebar { width: 300px; background: #1e1e1e; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-right: 2px solid #333; z-index: 10; }
+    #board-container { flex: 1; display: flex; justify-content: center; align-items: center; background: #000; }
+    canvas { background: #d4a373; border: 6px solid #8d5b4c; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8); cursor: crosshair; }
+    .qr-box { background: #fff; padding: 8px; border-radius: 8px; display: flex; justify-content: center; }
+    .player-list { list-style: none; }
+    .player-item { padding: 6px 10px; background: #2a2a2a; margin-bottom: 4px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .online { background: #4caf50; } .offline { background: #f44336; }
+    button { padding: 8px; background: #e74c3c; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
     button:hover { background: #c0392b; }
-
-    /* Hindring / Død sone (Glass) */
-    .obstacle {
-      position: absolute;
-      border-radius: 50%;
-      background: rgba(231, 76, 60, 0.4);
-      border: 2px dashed #e74c3c;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      color: #fff;
-      font-size: 0.8rem;
-      font-weight: bold;
-    }
+    .turn-box { background: #2a2a2a; padding: 10px; border-radius: 6px; text-align: center; border-left: 4px solid #4a90e2; }
   </style>
 </head>
 <body>
 
   <div id="sidebar">
-    <h2>Hybrid Bordspill</h2>
+    <h2>Shuffleboard</h2>
     
-    <div class="qr-box">
-      <div id="qrcode"></div>
-    </div>
-    <p style="text-align: center; font-size: 0.8em; color: #aaa;">Skann for å bli med</p>
-
-    <div class="control-group">
-      <label for="widthSlider">Bordbredde: <span id="widthVal">100</span>%</label>
-      <input type="range" id="widthSlider" min="50" max="100" value="100">
+    <div class="turn-box">
+      <small style="color:#aaa;">Neste til å skyte:</small>
+      <h3 id="turnName" style="color:#4a90e2;">Venter...</h3>
     </div>
 
-    <div class="control-group">
-      <label for="heightSlider">Bordhøyde: <span id="heightVal">90</span>vh</label>
-      <input type="range" id="heightSlider" min="40" max="95" value="90">
-    </div>
+    <div class="qr-box"><div id="qrcode"></div></div>
 
-    <div class="control-group">
-      <label for="glassSize">Glassstørrelse (px): <span id="glassVal">80</span>px</label>
-      <input type="range" id="glassSize" min="40" max="200" value="80">
-      <p style="font-size: 0.75em; color: #888;">Klikk på bordet for å plassere et glass / hindring.</p>
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <label>Bredde (%): <span id="wVal">100</span></label>
+      <input type="range" id="wSlider" min="50" max="100" value="100">
+      <label>Glassstørrelse: <span id="gVal">80</span>px</label>
+      <input type="range" id="gSlider" min="40" max="160" value="80">
+      <button id="clearBtn">Fjern hindringer</button>
+      <button id="resetBtn" style="background:#3498db; margin-top:4px;">Ny Runde / Tøm Banen</button>
     </div>
-
-    <button id="clearBtn">Fjern alle hindringer</button>
 
     <div>
       <h3>Spillere</h3>
@@ -134,101 +49,176 @@
     </div>
   </div>
 
-  <div id="game-board-container">
-    <div id="game-board" style="width: 100%; height: 90vh;">
-      <!-- Hindringer og spillobjekter rendres her -->
-    </div>
+  <div id="board-container">
+    <canvas id="boardCanvas"></canvas>
   </div>
 
   <script>
     const socket = io();
-    const board = document.getElementById('game-board');
-    const widthSlider = document.getElementById('widthSlider');
-    const heightSlider = document.getElementById('heightSlider');
-    const widthVal = document.getElementById('widthVal');
-    const heightVal = document.getElementById('heightVal');
-    const glassSizeInput = document.getElementById('glassSize');
-    const glassVal = document.getElementById('glassVal');
-    const clearBtn = document.getElementById('clearBtn');
-    const playerList = document.getElementById('players');
+    const canvas = document.getElementById('boardCanvas');
+    const ctx = canvas.getContext('2d');
+    const wSlider = document.getElementById('wSlider');
+    const gSlider = document.getElementById('gSlider');
 
-    // Generer QR-kode
-    const joinUrl = `${window.location.origin}/mobile.html`;
-    new QRCode(document.getElementById("qrcode"), { text: joinUrl, width: 140, height: 140 });
+    let boardConfig = { widthRatio: 100, obstacles: [] };
+    let pucks = [];
+    const PUCK_RADIUS = 18;
 
+    function resizeCanvas() {
+      const container = document.getElementById('board-container');
+      canvas.height = container.clientHeight * 0.92;
+      canvas.width = (canvas.height * 0.45) * (boardConfig.widthRatio / 100);
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    new QRCode(document.getElementById("qrcode"), { text: `${window.location.origin}/mobile.html`, width: 120, height: 120 });
     socket.emit('registerBoard');
 
-    // Dimensjonskontroll
-    widthSlider.addEventListener('input', (e) => {
-      widthVal.textContent = e.target.value;
-      board.style.width = `${e.target.value}%`;
+    wSlider.addEventListener('input', (e) => {
+      document.getElementById('wVal').textContent = e.target.value;
       socket.emit('updateBoardConfig', { widthRatio: e.target.value });
     });
+    gSlider.addEventListener('input', (e) => document.getElementById('gVal').textContent = e.target.value);
+    document.getElementById('clearBtn').addEventListener('click', () => socket.emit('clearObstacles'));
+    document.getElementById('resetBtn').addEventListener('click', () => socket.emit('resetGame'));
 
-    heightSlider.addEventListener('input', (e) => {
-      heightVal.textContent = e.target.value;
-      board.style.height = `${e.target.value}vh`;
-      socket.emit('updateBoardConfig', { heightRatio: e.target.value });
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const xPercent = ((e.clientX - rect.left) / canvas.width) * 100;
+      const yPercent = ((e.clientY - rect.top) / canvas.height) * 100;
+      socket.emit('addObstacle', { x: xPercent, y: yPercent, radius: parseInt(gSlider.value) / 2, label: 'Glass' });
     });
 
-    glassSizeInput.addEventListener('input', (e) => {
-      glassVal.textContent = e.target.value;
+    socket.on('boardConfigUpdate', (cfg) => {
+      boardConfig = cfg;
+      wSlider.value = cfg.widthRatio;
+      document.getElementById('wVal').textContent = cfg.widthRatio;
+      resizeCanvas();
     });
 
-    // Legg til hindring ved klikk på bordet
-    board.addEventListener('click', (e) => {
-      const rect = board.getBoundingClientRect();
-      const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
-      const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
-      const radiusPx = parseInt(glassSizeInput.value) / 2;
-
-      socket.emit('addObstacle', {
-        x: xPercent,
-        y: yPercent,
-        radius: radiusPx,
-        label: 'Glass'
-      });
+    socket.on('puckShot', (puck) => {
+      // Omregn % hastighet til faktiske Canvas PX-hastigheter
+      puck.px = (puck.x / 100) * canvas.width;
+      puck.py = (puck.y / 100) * canvas.height;
+      puck.vxPx = (puck.vx / 100) * canvas.width;
+      puck.vyPx = (puck.vy / 100) * canvas.height;
+      pucks.push(puck);
     });
 
-    clearBtn.addEventListener('click', () => {
-      socket.emit('clearObstacles');
+    socket.on('gameStateUpdate', (gs) => {
+      pucks = gs.pucks || [];
     });
 
-    // Oppdatering fra server
-    socket.on('boardConfigUpdate', (config) => {
-      board.style.width = `${config.widthRatio}%`;
-      board.style.height = `${config.heightRatio}vh`;
-      widthSlider.value = config.widthRatio;
-      heightSlider.value = config.heightRatio;
-      widthVal.textContent = config.widthRatio;
-      heightVal.textContent = config.heightRatio;
-
-      // Render hindringer
-      document.querySelectorAll('.obstacle').forEach(el => el.remove());
-      config.obstacles.forEach(obs => {
-        const div = document.createElement('div');
-        div.className = 'obstacle';
-        div.style.left = `${obs.x}%`;
-        div.style.top = `${obs.y}%`;
-        div.style.width = `${obs.radius * 2}px`;
-        div.style.height = `${obs.radius * 2}px`;
-        div.textContent = obs.label || '';
-        board.appendChild(div);
-      });
+    socket.on('turnUpdate', ({ name }) => {
+      document.getElementById('turnName').textContent = name || 'Ingen';
     });
 
     socket.on('playerListUpdate', (players) => {
-      playerList.innerHTML = '';
+      const list = document.getElementById('players');
+      list.innerHTML = '';
       players.forEach(p => {
-        const li = document.createElement('li');
-        li.className = 'player-item';
-        li.innerHTML = `
-          <span>${p.name}</span>
+        list.innerHTML += `<li class="player-item">
+          <span><span style="color:${p.color}">●</span> ${p.name}</span>
           <span class="status-dot ${p.connected ? 'online' : 'offline'}"></span>
-        `;
-        playerList.appendChild(li);
+        </li>`;
       });
     });
+
+    // --- ENKEL FYSIKK & TEGNING ---
+    function updatePhysics() {
+      const friction = 0.988;
+
+      pucks.forEach(p => {
+        if (Math.abs(p.vxPx) < 0.05 && Math.abs(p.vyPx) < 0.05) {
+          p.vxPx = 0; p.vyPx = 0;
+          return;
+        }
+
+        p.px += p.vxPx;
+        p.py += p.vyPx;
+        p.vxPx *= friction;
+        p.vyPx *= friction;
+
+        // Veggkollisjon (Sider)
+        if (p.px - PUCK_RADIUS < 0 || p.px + PUCK_RADIUS > canvas.width) {
+          p.vxPx *= -0.8;
+          p.px = Math.max(PUCK_RADIUS, Math.min(canvas.width - PUCK_RADIUS, p.px));
+        }
+
+        // Hindringer / Glass-kollisjon
+        boardConfig.obstacles.forEach(obs => {
+          const obsX = (obs.x / 100) * canvas.width;
+          const obsY = (obs.y / 100) * canvas.height;
+          const dx = p.px - obsX;
+          const dy = p.py - obsY;
+          const dist = Math.hypot(dx, dy);
+
+          if (dist < PUCK_RADIUS + obs.radius) {
+            const angle = Math.atan2(dy, dx);
+            const speed = Math.hypot(p.vxPx, p.vyPx);
+            p.vxPx = Math.cos(angle) * speed * 0.7;
+            p.vyPx = Math.sin(angle) * speed * 0.7;
+          }
+        });
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Tegn Poengsoner (Øverst på banen)
+      const zoneH = canvas.height * 0.08;
+      const zones = [
+        { name: '4 Poeng', color: '#e67e22', y: 0 },
+        { name: '3 Poeng', color: '#f1c40f', y: zoneH },
+        { name: '2 Poeng', color: '#2ecc71', y: zoneH * 2 },
+        { name: '1 Poeng', color: '#3498db', y: zoneH * 3 }
+      ];
+
+      zones.forEach(z => {
+        ctx.fillStyle = z.color + '44';
+        ctx.fillRect(0, z.y, canvas.width, zoneH);
+        ctx.strokeStyle = '#fff';
+        ctx.strokeRect(0, z.y, canvas.width, zoneH);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(z.name, canvas.width / 2, z.y + zoneH / 1.5);
+      });
+
+      // Tegn Hindringer (Glass)
+      boardConfig.obstacles.forEach(obs => {
+        const ox = (obs.x / 100) * canvas.width;
+        const oy = (obs.y / 100) * canvas.height;
+        ctx.beginPath();
+        ctx.arc(ox, oy, obs.radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(231, 76, 60, 0.5)';
+        ctx.fill();
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('GLASS', ox, oy + 4);
+      });
+
+      // Tegn Pucker
+      pucks.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, PUCK_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+      });
+
+      updatePhysics();
+      requestAnimationFrame(draw);
+    }
+
+    resizeCanvas();
+    draw();
   </script>
 </body>
 </html>
