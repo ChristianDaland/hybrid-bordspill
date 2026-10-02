@@ -9,18 +9,30 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background-color: #121212; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; display: flex; height: 100vh; }
-    #sidebar { width: 300px; background: #1e1e1e; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-right: 2px solid #333; z-index: 10; }
+    #sidebar { width: 320px; background: #1e1e1e; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-right: 2px solid #333; z-index: 10; }
     #board-container { flex: 1; display: flex; justify-content: center; align-items: center; background: #0a0a0c; padding: 20px; }
-    canvas { background: #d4a373; border: 8px solid #5c3a21; border-radius: 8px; box-shadow: 0 0 30px rgba(0,0,0,0.9); }
+    canvas { background: #d4a373; border: 8px solid #5c3a21; border-radius: 8px; box-shadow: 0 0 30px rgba(0,0,0,0.9); cursor: crosshair; }
     .qr-box { background: #fff; padding: 8px; border-radius: 8px; display: flex; justify-content: center; align-items: center; min-height: 136px; }
     .player-list { list-style: none; margin-top: 8px; }
     .player-item { padding: 8px 10px; background: #2a2a2a; margin-bottom: 6px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; font-weight: 500; }
     .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .online { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; } 
     .offline { background: #e74c3c; }
-    button { padding: 10px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-    button:hover { background: #c0392b; }
+    
+    .btn { padding: 10px; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; width: 100%; }
+    .btn-green { background: #2ecc71; color: #111; }
+    .btn-green:hover { background: #27ae60; }
+    .btn-orange { background: #e67e22; }
+    .btn-orange:hover { background: #d35400; }
+    .btn-red { background: #e74c3c; }
+    .btn-red:hover { background: #c0392b; }
+    .btn-blue { background: #3498db; }
+    .btn-blue:hover { background: #2980b9; }
+
     .turn-box { background: #2a2a2a; padding: 12px; border-radius: 6px; text-align: center; border-left: 4px solid #3498db; }
+    .mode-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
+    .mode-edit { background: #f39c12; color: #000; }
+    .mode-play { background: #2ecc71; color: #000; }
   </style>
 </head>
 <body>
@@ -36,14 +48,20 @@
     <div class="qr-box"><div id="qrcode"></div></div>
 
     <div style="display:flex; flex-direction:column; gap:8px;">
-      <label style="font-size: 0.9em;">Bordbredde (%): <span id="wVal">100</span></label>
+      <div style="text-align:center;">
+        <span id="modeBadge" class="mode-badge mode-edit">Kalibreringsmodus</span>
+      </div>
+
+      <button id="saveObstaclesBtn" class="btn btn-green">Lagre hindringer</button>
+      <button id="editObstaclesBtn" class="btn btn-orange" style="display:none;">Endre hindringer</button>
+      <button id="clearBtn" class="btn btn-red">Fjern alle hindringer</button>
+      
+      <hr style="border: 0.5px solid #333; margin: 4px 0;">
+
+      <label style="font-size: 0.85em;">Bordbredde (%): <span id="wVal">100</span></label>
       <input type="range" id="wSlider" min="50" max="100" value="100">
-      
-      <label style="font-size: 0.9em;">Glass-størrelse: <span id="gVal">80</span>px</label>
-      <input type="range" id="gSlider" min="40" max="160" value="80">
-      
-      <button id="clearBtn" style="background:#444; margin-top:4px;">Fjern hindringer</button>
-      <button id="resetBtn" style="background:#3498db;">Ny Runde / Tøm Banen</button>
+
+      <button id="resetBtn" class="btn btn-blue" style="margin-top:4px;">Ny Runde / Tøm Banen</button>
     </div>
 
     <div>
@@ -61,11 +79,19 @@
     const canvas = document.getElementById('boardCanvas');
     const ctx = canvas.getContext('2d');
     const wSlider = document.getElementById('wSlider');
-    const gSlider = document.getElementById('gSlider');
+    const saveBtn = document.getElementById('saveObstaclesBtn');
+    const editBtn = document.getElementById('editObstaclesBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const modeBadge = document.getElementById('modeBadge');
 
     let boardConfig = { widthRatio: 100, obstacles: [] };
     let pucks = [];
     const PUCK_RADIUS = 18;
+
+    let isEditMode = true;
+    let draggedObstacle = null;
+    let hoveredObstacle = null;
 
     function resizeCanvas() {
       const container = document.getElementById('board-container');
@@ -74,9 +100,7 @@
       canvas.width = Math.max(200, (canvas.height * 0.45) * (boardConfig.widthRatio / 100));
     }
 
-    window.addEventListener('resize', () => {
-      resizeCanvas();
-    });
+    window.addEventListener('resize', resizeCanvas);
 
     try {
       if (window.QRCode) {
@@ -94,21 +118,114 @@
       document.getElementById('wVal').textContent = e.target.value;
       socket.emit('updateBoardConfig', { widthRatio: e.target.value });
     });
-    
-    gSlider.addEventListener('input', (e) => {
-      document.getElementById('gVal').textContent = e.target.value;
-    });
 
-    document.getElementById('clearBtn').addEventListener('click', () => socket.emit('clearObstacles'));
-    document.getElementById('resetBtn').addEventListener('click', () => socket.emit('resetGame'));
-
-    canvas.addEventListener('click', (e) => {
+    // --- MUSEDRA OG SCROLL FOR HINDRINGER ---
+    function getCanvasCoords(e) {
       const rect = canvas.getBoundingClientRect();
-      const xPercent = ((e.clientX - rect.left) / canvas.width) * 100;
-      const yPercent = ((e.clientY - rect.top) / canvas.height) * 100;
-      socket.emit('addObstacle', { x: xPercent, y: yPercent, radius: parseInt(gSlider.value) / 2, label: 'Glass' });
+      const xPx = e.clientX - rect.left;
+      const yPx = e.clientY - rect.top;
+      return {
+        xPx,
+        yPx,
+        xPercent: (xPx / canvas.width) * 100,
+        yPercent: (yPx / canvas.height) * 100
+      };
+    }
+
+    function findObstacleAt(xPx, yPx) {
+      return boardConfig.obstacles.find(obs => {
+        const ox = (obs.x / 100) * canvas.width;
+        const oy = (obs.y / 100) * canvas.height;
+        const dist = Math.hypot(xPx - ox, yPx - oy);
+        return dist <= obs.radius + 10; // Liten margin for enklere treff
+      });
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (!isEditMode) return;
+      const coords = getCanvasCoords(e);
+      const hit = findObstacleAt(coords.xPx, coords.yPx);
+
+      if (hit) {
+        draggedObstacle = hit;
+      } else {
+        // Ny sirkel
+        const newObs = {
+          x: coords.xPercent,
+          y: coords.yPercent,
+          radius: 40,
+          label: 'Glass'
+        };
+        boardConfig.obstacles.push(newObs);
+        draggedObstacle = newObs;
+      }
     });
 
+    canvas.addEventListener('mousemove', (e) => {
+      const coords = getCanvasCoords(e);
+      hoveredObstacle = findObstacleAt(coords.xPx, coords.yPx);
+
+      if (isEditMode && draggedObstacle) {
+        draggedObstacle.x = Math.max(0, Math.min(100, coords.xPercent));
+        draggedObstacle.y = Math.max(0, Math.min(100, coords.yPercent));
+      }
+
+      canvas.style.cursor = isEditMode ? (hoveredObstacle ? 'move' : 'crosshair') : 'default';
+    });
+
+    window.addEventListener('mouseup', () => {
+      draggedObstacle = null;
+    });
+
+    // Juster størrelse med mus-scroll
+    canvas.addEventListener('wheel', (e) => {
+      if (!isEditMode) return;
+      const coords = getCanvasCoords(e);
+      const target = findObstacleAt(coords.xPx, coords.yPx) || hoveredObstacle;
+
+      if (target) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 3 : -3;
+        target.radius = Math.max(15, Math.min(150, target.radius + delta));
+      }
+    }, { passive: false });
+
+    // Dobbelklikk for å fjerne enkelt-sirkel
+    canvas.addEventListener('dblclick', (e) => {
+      if (!isEditMode) return;
+      const coords = getCanvasCoords(e);
+      const hit = findObstacleAt(coords.xPx, coords.yPx);
+      if (hit) {
+        boardConfig.obstacles = boardConfig.obstacles.filter(o => o !== hit);
+      }
+    });
+
+    // --- MODUS-KONTROLL OG KNAPPER ---
+    saveBtn.addEventListener('click', () => {
+      isEditMode = false;
+      modeBadge.textContent = "Spillmodus (Låst)";
+      modeBadge.className = "mode-badge mode-play";
+      saveBtn.style.display = "none";
+      editBtn.style.display = "block";
+      socket.emit('updateBoardConfig', { obstacles: boardConfig.obstacles });
+    });
+
+    editBtn.addEventListener('click', () => {
+      isEditMode = true;
+      modeBadge.textContent = "Kalibreringsmodus";
+      modeBadge.className = "mode-badge mode-edit";
+      saveBtn.style.display = "block";
+      editBtn.style.display = "none";
+    });
+
+    clearBtn.addEventListener('click', () => {
+      boardConfig.obstacles = [];
+      socket.emit('clearObstacles');
+    });
+
+    resetBtn.addEventListener('click', () => socket.emit('resetGame'));
+
+    // --- SOCKET EVENTS ---
     socket.on('boardConfigUpdate', (cfg) => {
       boardConfig = cfg;
       wSlider.value = cfg.widthRatio;
@@ -154,7 +271,6 @@
     function updatePhysics() {
       const friction = 0.988;
 
-      // 1. Oppdater posisjoner og sjekk om pucken faller utfor kanten
       pucks.forEach(p => {
         if (Math.abs(p.vxPx) < 0.05 && Math.abs(p.vyPx) < 0.05) {
           p.vxPx = 0; 
@@ -166,7 +282,6 @@
           p.vyPx *= friction;
         }
 
-        // Kollisjon med hindringer (Glass) på bordet
         boardConfig.obstacles.forEach(obs => {
           const obsX = (obs.x / 100) * canvas.width;
           const obsY = (obs.y / 100) * canvas.height;
@@ -183,7 +298,6 @@
         });
       });
 
-      // 2. Kollisjon mellom pucker (2D Elastisk støt)
       for (let i = 0; i < pucks.length; i++) {
         for (let j = i + 1; j < pucks.length; j++) {
           const p1 = pucks[i];
@@ -216,7 +330,6 @@
         }
       }
 
-      // 3. Fjern pucker hvis mer enn halvparten av pucken er ute over kanten (eller sentrum er utenfor)
       pucks = pucks.filter(p => {
         const outsideLeft = p.px < 0;
         const outsideRight = p.px > canvas.width;
@@ -250,21 +363,37 @@
         ctx.fillText(z.name, canvas.width / 2, z.y + zoneH / 1.5);
       });
 
+      // TEGN HINDRINGER (GLASS)
       boardConfig.obstacles.forEach(obs => {
         const ox = (obs.x / 100) * canvas.width;
         const oy = (obs.y / 100) * canvas.height;
+
         ctx.beginPath();
         ctx.arc(ox, oy, obs.radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(231, 76, 60, 0.6)';
+
+        if (isEditMode) {
+          ctx.fillStyle = (obs === hoveredObstacle) ? 'rgba(241, 196, 15, 0.6)' : 'rgba(231, 76, 60, 0.5)';
+          ctx.strokeStyle = (obs === hoveredObstacle) ? '#f39c12' : '#e74c3c';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([6, 4]); // Stiplet linje i redigeringsmodus
+        } else {
+          ctx.fillStyle = 'rgba(231, 76, 60, 0.6)';
+          ctx.strokeStyle = '#e74c3c';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([]);
+        }
+
         ctx.fill();
-        ctx.strokeStyle = '#e74c3c';
-        ctx.lineWidth = 3;
         ctx.stroke();
+        ctx.setLineDash([]);
+
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
         ctx.fillText('GLASS', ox, oy + 4);
       });
 
+      // TEGN PUCKER
       pucks.forEach(p => {
         ctx.beginPath();
         ctx.arc(p.px, p.py, PUCK_RADIUS, 0, Math.PI * 2);
