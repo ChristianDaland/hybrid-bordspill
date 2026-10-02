@@ -8,18 +8,19 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background-color: #121212; color: #fff; font-family: sans-serif; overflow: hidden; display: flex; height: 100vh; }
+    body { background-color: #121212; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; display: flex; height: 100vh; }
     #sidebar { width: 300px; background: #1e1e1e; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-right: 2px solid #333; z-index: 10; }
-    #board-container { flex: 1; display: flex; justify-content: center; align-items: center; background: #000; }
-    canvas { background: #d4a373; border: 6px solid #8d5b4c; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8); cursor: crosshair; }
-    .qr-box { background: #fff; padding: 8px; border-radius: 8px; display: flex; justify-content: center; }
-    .player-list { list-style: none; }
-    .player-item { padding: 6px 10px; background: #2a2a2a; margin-bottom: 4px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-    .online { background: #4caf50; } .offline { background: #f44336; }
-    button { padding: 8px; background: #e74c3c; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+    #board-container { flex: 1; display: flex; justify-content: center; align-items: center; background: #0a0a0c; padding: 20px; }
+    canvas { background: #d4a373; border: 8px solid #5c3a21; border-radius: 8px; box-shadow: 0 0 30px rgba(0,0,0,0.9); }
+    .qr-box { background: #fff; padding: 8px; border-radius: 8px; display: flex; justify-content: center; align-items: center; min-height: 136px; }
+    .player-list { list-style: none; margin-top: 8px; }
+    .player-item { padding: 8px 10px; background: #2a2a2a; margin-bottom: 6px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; font-weight: 500; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .online { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; } 
+    .offline { background: #e74c3c; }
+    button { padding: 10px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
     button:hover { background: #c0392b; }
-    .turn-box { background: #2a2a2a; padding: 10px; border-radius: 6px; text-align: center; border-left: 4px solid #4a90e2; }
+    .turn-box { background: #2a2a2a; padding: 12px; border-radius: 6px; text-align: center; border-left: 4px solid #3498db; }
   </style>
 </head>
 <body>
@@ -28,23 +29,25 @@
     <h2>Shuffleboard</h2>
     
     <div class="turn-box">
-      <small style="color:#aaa;">Neste til å skyte:</small>
-      <h3 id="turnName" style="color:#4a90e2;">Venter...</h3>
+      <small style="color:#aaa; font-size: 0.8em; text-transform: uppercase; letter-spacing: 1px;">Neste kast:</small>
+      <h3 id="turnName" style="color:#3498db; margin-top: 4px;">Venter på spillere...</h3>
     </div>
 
     <div class="qr-box"><div id="qrcode"></div></div>
 
-    <div style="display:flex; flex-direction:column; gap:6px;">
-      <label>Bredde (%): <span id="wVal">100</span></label>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <label style="font-size: 0.9em;">Bordbredde (%): <span id="wVal">100</span></label>
       <input type="range" id="wSlider" min="50" max="100" value="100">
-      <label>Glassstørrelse: <span id="gVal">80</span>px</label>
+      
+      <label style="font-size: 0.9em;">Glass-størrelse: <span id="gVal">80</span>px</label>
       <input type="range" id="gSlider" min="40" max="160" value="80">
-      <button id="clearBtn">Fjern hindringer</button>
-      <button id="resetBtn" style="background:#3498db; margin-top:4px;">Ny Runde / Tøm Banen</button>
+      
+      <button id="clearBtn" style="background:#444; margin-top:4px;">Fjern hindringer</button>
+      <button id="resetBtn" style="background:#3498db;">Ny Runde / Tøm Banen</button>
     </div>
 
     <div>
-      <h3>Spillere</h3>
+      <h3 style="font-size: 1.1em; margin-bottom: 4px;">Spillere</h3>
       <ul id="players" class="player-list"></ul>
     </div>
   </div>
@@ -66,19 +69,37 @@
 
     function resizeCanvas() {
       const container = document.getElementById('board-container');
-      canvas.height = container.clientHeight * 0.92;
-      canvas.width = (canvas.height * 0.45) * (boardConfig.widthRatio / 100);
+      if (!container) return;
+      canvas.height = Math.max(300, container.clientHeight * 0.92);
+      canvas.width = Math.max(200, (canvas.height * 0.45) * (boardConfig.widthRatio / 100));
     }
-    window.addEventListener('resize', resizeCanvas);
 
-    new QRCode(document.getElementById("qrcode"), { text: `${window.location.origin}/mobile.html`, width: 120, height: 120 });
+    window.addEventListener('resize', () => {
+      resizeCanvas();
+    });
+
+    // Trygg QR-generering
+    try {
+      if (window.QRCode) {
+        new QRCode(document.getElementById("qrcode"), { 
+          text: `${window.location.origin}/mobile.html`, 
+          width: 120, 
+          height: 120 
+        });
+      }
+    } catch(e) { console.error("QR error:", e); }
+
     socket.emit('registerBoard');
 
     wSlider.addEventListener('input', (e) => {
       document.getElementById('wVal').textContent = e.target.value;
       socket.emit('updateBoardConfig', { widthRatio: e.target.value });
     });
-    gSlider.addEventListener('input', (e) => document.getElementById('gVal').textContent = e.target.value);
+    
+    gSlider.addEventListener('input', (e) => {
+      document.getElementById('gVal').textContent = e.target.value;
+    });
+
     document.getElementById('clearBtn').addEventListener('click', () => socket.emit('clearObstacles'));
     document.getElementById('resetBtn').addEventListener('click', () => socket.emit('resetGame'));
 
@@ -97,7 +118,6 @@
     });
 
     socket.on('puckShot', (puck) => {
-      // Omregn % hastighet til faktiske Canvas PX-hastigheter
       puck.px = (puck.x / 100) * canvas.width;
       puck.py = (puck.y / 100) * canvas.height;
       puck.vxPx = (puck.vx / 100) * canvas.width;
@@ -124,7 +144,6 @@
       });
     });
 
-    // --- ENKEL FYSIKK & TEGNING ---
     function updatePhysics() {
       const friction = 0.988;
 
@@ -139,13 +158,11 @@
         p.vxPx *= friction;
         p.vyPx *= friction;
 
-        // Veggkollisjon (Sider)
         if (p.px - PUCK_RADIUS < 0 || p.px + PUCK_RADIUS > canvas.width) {
           p.vxPx *= -0.8;
           p.px = Math.max(PUCK_RADIUS, Math.min(canvas.width - PUCK_RADIUS, p.px));
         }
 
-        // Hindringer / Glass-kollisjon
         boardConfig.obstacles.forEach(obs => {
           const obsX = (obs.x / 100) * canvas.width;
           const obsY = (obs.y / 100) * canvas.height;
@@ -164,23 +181,26 @@
     }
 
     function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Tøm lerretet med trebaneanimasjon/bakgrunn
+      ctx.fillStyle = '#d4a373';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Tegn Poengsoner (Øverst på banen)
       const zoneH = canvas.height * 0.08;
       const zones = [
-        { name: '4 Poeng', color: '#e67e22', y: 0 },
-        { name: '3 Poeng', color: '#f1c40f', y: zoneH },
-        { name: '2 Poeng', color: '#2ecc71', y: zoneH * 2 },
-        { name: '1 Poeng', color: '#3498db', y: zoneH * 3 }
+        { name: '4 Poeng', color: 'rgba(230, 126, 34, 0.4)', y: 0 },
+        { name: '3 Poeng', color: 'rgba(241, 196, 15, 0.4)', y: zoneH },
+        { name: '2 Poeng', color: 'rgba(46, 204, 113, 0.4)', y: zoneH * 2 },
+        { name: '1 Poeng', color: 'rgba(52, 152, 219, 0.4)', y: zoneH * 3 }
       ];
 
       zones.forEach(z => {
-        ctx.fillStyle = z.color + '44';
+        ctx.fillStyle = z.color;
         ctx.fillRect(0, z.y, canvas.width, zoneH);
-        ctx.strokeStyle = '#fff';
+        ctx.strokeStyle = '#5c3a21';
+        ctx.lineWidth = 2;
         ctx.strokeRect(0, z.y, canvas.width, zoneH);
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#1e1e1e';
         ctx.font = 'bold 16px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(z.name, canvas.width / 2, z.y + zoneH / 1.5);
@@ -192,13 +212,13 @@
         const oy = (obs.y / 100) * canvas.height;
         ctx.beginPath();
         ctx.arc(ox, oy, obs.radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(231, 76, 60, 0.5)';
+        ctx.fillStyle = 'rgba(231, 76, 60, 0.6)';
         ctx.fill();
         ctx.strokeStyle = '#e74c3c';
         ctx.lineWidth = 3;
         ctx.stroke();
         ctx.fillStyle = '#fff';
-        ctx.font = '12px sans-serif';
+        ctx.font = 'bold 12px sans-serif';
         ctx.fillText('GLASS', ox, oy + 4);
       });
 
@@ -206,7 +226,7 @@
       pucks.forEach(p => {
         ctx.beginPath();
         ctx.arc(p.px, p.py, PUCK_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = p.color;
+        ctx.fillStyle = p.color || '#e74c3c';
         ctx.fill();
         ctx.lineWidth = 3;
         ctx.strokeStyle = '#fff';
@@ -217,8 +237,9 @@
       requestAnimationFrame(draw);
     }
 
+    // Start opp tegning
     resizeCanvas();
-    draw();
+    requestAnimationFrame(draw);
   </script>
 </body>
 </html>
