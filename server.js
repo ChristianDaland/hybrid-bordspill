@@ -94,7 +94,7 @@ io.on('connection', (socket) => {
     io.emit('gameStateUpdate', gameState);
   });
 
-  // --- SPILLERADMINISTRASJON (KAST UT SPILLERE) ---
+  // --- SPILLERADMINISTRASJON ---
   socket.on('kickPlayer', (targetUuid) => {
     if (players[targetUuid]) {
       const targetSocketId = players[targetUuid].socketId;
@@ -152,6 +152,7 @@ io.on('connection', (socket) => {
       stopped: false
     };
 
+    gameState.pucks.push(newPuck);
     io.emit('puckShot', newPuck);
 
     gameState.activePlayerIndex++;
@@ -169,6 +170,7 @@ io.on('connection', (socket) => {
       gameState.pucksLeft[p.uuid] = gameState.pucksPerPlayer;
     });
 
+    io.emit('resetGame');
     io.emit('gameStateUpdate', gameState);
     checkNextTurnOrEnd();
   });

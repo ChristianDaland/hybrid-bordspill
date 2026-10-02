@@ -9,16 +9,21 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background-color: #121212; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; display: flex; height: 100vh; }
-    #sidebar { width: 320px; background: #1e1e1e; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-right: 2px solid #333; z-index: 10; }
+    #sidebar { width: 340px; background: #1e1e1e; padding: 16px; display: flex; flex-direction: column; gap: 12px; border-right: 2px solid #333; z-index: 10; overflow-y: auto; }
     #board-container { flex: 1; display: flex; justify-content: center; align-items: center; background: #0a0a0c; padding: 20px; position: relative; }
     canvas { background: #d4a373; border: 8px solid #5c3a21; border-radius: 8px; box-shadow: 0 0 30px rgba(0,0,0,0.9); cursor: crosshair; }
     .qr-box { background: #fff; padding: 8px; border-radius: 8px; display: flex; justify-content: center; align-items: center; min-height: 136px; }
-    .player-list { list-style: none; margin-top: 8px; }
+    
+    .player-list { list-style: none; margin-top: 6px; }
     .player-item { padding: 8px 10px; background: #2a2a2a; margin-bottom: 6px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; font-weight: 500; }
+    .player-info { display: flex; align-items: center; gap: 8px; }
     .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .online { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; } 
     .offline { background: #e74c3c; }
     
+    .kick-btn { background: #e74c3c; color: #fff; border: none; border-radius: 4px; padding: 4px 8px; font-size: 0.75rem; font-weight: bold; cursor: pointer; }
+    .kick-btn:hover { background: #c0392b; }
+
     .btn { padding: 10px; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; width: 100%; }
     .btn-green { background: #2ecc71; color: #111; }
     .btn-green:hover { background: #27ae60; }
@@ -83,7 +88,10 @@
     </div>
 
     <div>
-      <h3 style="font-size: 1.1em; margin-bottom: 4px;">Spillere</h3>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 4px;">
+        <h3 style="font-size: 1.1em;">Spillere</h3>
+        <button id="kickAllBtn" style="background:none; border:none; color:#e74c3c; font-size:0.75rem; cursor:pointer; text-decoration:underline;">Kast ut alle</button>
+      </div>
       <ul id="players" class="player-list"></ul>
     </div>
   </div>
@@ -109,6 +117,7 @@
     const clearBtn = document.getElementById('clearBtn');
     const resetBtn = document.getElementById('resetBtn');
     const restartGameBtn = document.getElementById('restartGameBtn');
+    const kickAllBtn = document.getElementById('kickAllBtn');
     const modeBadge = document.getElementById('modeBadge');
     const winnerOverlay = document.getElementById('winnerOverlay');
     const winnerText = document.getElementById('winnerText');
@@ -199,6 +208,12 @@
     puckSlider.addEventListener('input', (e) => {
       document.getElementById('puckCountVal').textContent = e.target.value;
       socket.emit('setPucksPerPlayer', e.target.value);
+    });
+
+    kickAllBtn.addEventListener('click', () => {
+      if (confirm("Vil du kaste ut ALLE spillere fra rommet?")) {
+        socket.emit('kickAllPlayers');
+      }
     });
 
     function getCanvasCoords(e) {
@@ -318,8 +333,23 @@
       pucks.push(puck);
     });
 
+    socket.on('resetGame', () => {
+      pucks = [];
+      winnerOverlay.style.display = 'none';
+      gameEndedSignalReceived = false;
+      winnerCalculated = false;
+    });
+
     socket.on('gameStateUpdate', (gs) => {
       pucks = gs.pucks || [];
+      pucks.forEach(p => {
+        if (p.px === undefined) {
+          p.px = (p.x / 100) * canvas.width;
+          p.py = (p.y / 100) * canvas.height;
+          p.vxPx = ((p.vx || 0) / 100) * canvas.width;
+          p.vyPx = ((p.vy || 0) / 100) * canvas.height;
+        }
+      });
       if (!gs.gameEnded) {
         winnerOverlay.style.display = 'none';
         gameEndedSignalReceived = false;
@@ -328,7 +358,11 @@
     });
 
     socket.on('turnUpdate', ({ name, pucksLeft }) => {
-      document.getElementById('turnName').textContent = `${name} (${pucksLeft} igjen)`;
+      if (name === 'Ingen spillere' || !name) {
+        document.getElementById('turnName').textContent = 'Ingen spillere tilkoblet';
+      } else {
+        document.getElementById('turnName').textContent = `${name} (${pucksLeft} igjen)`;
+      }
     });
 
     socket.on('playerListUpdate', (players) => {
@@ -336,12 +370,22 @@
       const list = document.getElementById('players');
       list.innerHTML = '';
       players.forEach(p => {
-        list.innerHTML += `<li class="player-item">
-          <span><span style="color:${p.color}">●</span> ${p.name}</span>
-          <span class="status-dot ${p.connected ? 'online' : 'offline'}"></span>
-        </li>`;
+        const li = document.createElement('li');
+        li.className = 'player-item';
+        li.innerHTML = `
+          <div class="player-info">
+            <span class="status-dot ${p.connected ? 'online' : 'offline'}"></span>
+            <span><span style="color:${p.color}">●</span> ${p.name}</span>
+          </div>
+          <button class="kick-btn" onclick="kickPlayer('${p.uuid}')">Fjern</button>
+        `;
+        list.appendChild(li);
       });
     });
+
+    window.kickPlayer = function(uuid) {
+      socket.emit('kickPlayer', uuid);
+    };
 
     socket.on('gameEnded', () => {
       gameEndedSignalReceived = true;
@@ -391,7 +435,7 @@
       if (maxScore > 0) {
         if (scoreWinners.length === 1) {
           const winner = playerListGlobal.find(p => p.uuid === scoreWinners[0]);
-          winnerHtml = `<p>Vinneren er <b style="color:${winner.color}">${winner.name}</b> med <b>${maxScore} poeng</b>!</p>`;
+          winnerHtml = `<p>Vinneren er <b style="color:${winner ? winner.color : '#fff'}">${winner ? winner.name : 'Ukjent'}</b> med <b>${maxScore} poeng</b>!</p>`;
         } else {
           const winnerNames = scoreWinners.map(id => playerListGlobal.find(p => p.uuid === id)?.name).join(' & ');
           winnerHtml = `<p>Uavgjort! Delt seier mellom <b>${winnerNames}</b> med <b>${maxScore} poeng</b>!</p>`;
@@ -413,7 +457,7 @@
         if (maxPucks > 0) {
           if (puckWinners.length === 1) {
             const winner = playerListGlobal.find(p => p.uuid === puckWinners[0]);
-            winnerHtml = `<p>Ingen traff poengsonene! Vinneren er <b style="color:${winner.color}">${winner.name}</b> med flest pucker på bordet (<b>${maxPucks} pucker</b>)!</p>`;
+            winnerHtml = `<p>Ingen traff poengsonene! Vinneren er <b style="color:${winner ? winner.color : '#fff'}">${winner ? winner.name : 'Ukjent'}</b> med flest pucker på bordet (<b>${maxPucks} pucker</b>)!</p>`;
           } else {
             const winnerNames = puckWinners.map(id => playerListGlobal.find(p => p.uuid === id)?.name).join(' & ');
             winnerHtml = `<p>Ingen traff poengsonene! Delt seier mellom <b>${winnerNames}</b> med <b>${maxPucks} pucker</b> på bordet!</p>`;
@@ -511,7 +555,6 @@
         return !(outsideLeft || outsideRight || outsideTop || outsideBottom);
       });
 
-      // Sjekk om alle kast er utført ELLER om siste ball er stoppet helt
       if (gameEndedSignalReceived && !isAnyPuckMoving && !winnerCalculated) {
         winnerCalculated = true;
         calculateFinalScores();
