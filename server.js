@@ -15,8 +15,8 @@ let boardConfig = { widthRatio: 100, heightRatio: 90, obstacles: [] };
 let players = {}; 
 let gameState = {
   activePlayerIndex: 0,
-  pucksPerPlayer: 4, // Standard 4 pucker per spiller
-  pucksLeft: {},     // Hvor mange pucker hver spiller har igjen
+  pucksPerPlayer: 4,
+  pucksLeft: {},
   pucks: [], 
   gameEnded: false,
   winnerMessage: ''
@@ -28,9 +28,11 @@ function getActivePlayers() {
 
 function checkNextTurnOrEnd() {
   const activeList = getActivePlayers();
-  if (activeList.length === 0) return;
+  if (activeList.length === 0) {
+    io.emit('turnUpdate', { activeUuid: null, name: 'Ingen spillere', pucksLeft: 0 });
+    return;
+  }
 
-  // Sjekk om alle har kastet opp brukt opp sine pucker
   let totalRemainingPucks = 0;
   activeList.forEach(p => {
     totalRemainingPucks += (gameState.pucksLeft[p.uuid] || 0);
@@ -42,7 +44,6 @@ function checkNextTurnOrEnd() {
     return;
   }
 
-  // Finn neste spiller som faktisk har pucker igjen
   let attempts = 0;
   while (attempts < activeList.length) {
     const candidate = activeList[gameState.activePlayerIndex % activeList.length];
@@ -86,12 +87,43 @@ io.on('connection', (socket) => {
 
   socket.on('setPucksPerPlayer', (count) => {
     gameState.pucksPerPlayer = parseInt(count) || 4;
-    // Nullstill pucker for aktive spillere
     const activeList = getActivePlayers();
     activeList.forEach(p => {
       gameState.pucksLeft[p.uuid] = gameState.pucksPerPlayer;
     });
     io.emit('gameStateUpdate', gameState);
+  });
+
+  // --- SPILLERADMINISTRASJON (KAST UT SPILLERE) ---
+  socket.on('kickPlayer', (targetUuid) => {
+    if (players[targetUuid]) {
+      const targetSocketId = players[targetUuid].socketId;
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('kicked');
+      }
+      delete players[targetUuid];
+      delete gameState.pucksLeft[targetUuid];
+
+      io.to('board_room').emit('playerListUpdate', Object.values(players));
+      checkNextTurnOrEnd();
+    }
+  });
+
+  socket.on('kickAllPlayers', () => {
+    Object.values(players).forEach(p => {
+      if (p.socketId) {
+        io.to(p.socketId).emit('kicked');
+      }
+    });
+    players = {};
+    gameState.pucksLeft = {};
+    gameState.pucks = [];
+    gameState.activePlayerIndex = 0;
+    gameState.gameEnded = false;
+
+    io.to('board_room').emit('playerListUpdate', []);
+    io.emit('gameStateUpdate', gameState);
+    checkNextTurnOrEnd();
   });
 
   // --- SHUFFLEBOARD LOGIKK ---
@@ -106,7 +138,6 @@ io.on('connection', (socket) => {
 
     if ((gameState.pucksLeft[currentPlayer.uuid] || 0) <= 0) return;
 
-    // Trekk fra en puck
     gameState.pucksLeft[currentPlayer.uuid]--;
 
     const newPuck = {
@@ -123,7 +154,6 @@ io.on('connection', (socket) => {
 
     io.emit('puckShot', newPuck);
 
-    // Gå videre til neste spiller
     gameState.activePlayerIndex++;
     checkNextTurnOrEnd();
   });
@@ -143,7 +173,7 @@ io.on('connection', (socket) => {
     checkNextTurnOrEnd();
   });
 
-  // --- SPILLERHÅNDTERING ---
+  // --- JOIN GAME ---
   const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22'];
 
   socket.on('joinGame', ({ uuid, name }) => {

@@ -68,6 +68,7 @@
       localStorage.setItem('boardgame_uuid', uuid);
       localStorage.setItem('boardgame_name', name);
       handle.style.backgroundColor = color;
+      document.getElementById('join-card').classList.remove('hidden');
       document.getElementById('join-card').classList.add('hidden');
       document.getElementById('game-card').classList.remove('hidden');
       document.getElementById('welcomeMsg').textContent = name;
@@ -81,7 +82,7 @@
         turnBadge.style.color = "#000";
         handle.style.opacity = "1";
       } else {
-        turnBadge.textContent = `Venter på ${name}...`;
+        turnBadge.textContent = name ? `Venter på ${name}...` : 'Venter på spillere...';
         turnBadge.style.background = "#333";
         turnBadge.style.color = "#fff";
         handle.style.opacity = "0.5";
@@ -94,6 +95,13 @@
       turnBadge.style.background = "#f1c40f";
       turnBadge.style.color = "#000";
       handle.style.opacity = "0.3";
+    });
+
+    socket.on('kicked', () => {
+      localStorage.removeItem('boardgame_uuid');
+      localStorage.removeItem('boardgame_name');
+      alert("Du har blitt koblet fra spillet av verten.");
+      window.location.reload();
     });
 
     // BERØRINGS- OG DRAG-KONTROLL
