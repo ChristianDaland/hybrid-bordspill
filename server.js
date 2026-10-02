@@ -15,9 +15,49 @@ let boardConfig = { widthRatio: 100, heightRatio: 90, obstacles: [] };
 let players = {}; 
 let gameState = {
   activePlayerIndex: 0,
-  pucks: [], // Array av { id, playerUuid, color, x, y, vx, vy, stopped }
-  currentRound: 1
+  pucksPerPlayer: 4, // Standard 4 pucker per spiller
+  pucksLeft: {},     // Hvor mange pucker hver spiller har igjen
+  pucks: [], 
+  gameEnded: false,
+  winnerMessage: ''
 };
+
+function getActivePlayers() {
+  return Object.values(players).filter(p => p.connected);
+}
+
+function checkNextTurnOrEnd() {
+  const activeList = getActivePlayers();
+  if (activeList.length === 0) return;
+
+  // Sjekk om alle har kastet opp brukt opp sine pucker
+  let totalRemainingPucks = 0;
+  activeList.forEach(p => {
+    totalRemainingPucks += (gameState.pucksLeft[p.uuid] || 0);
+  });
+
+  if (totalRemainingPucks <= 0) {
+    gameState.gameEnded = true;
+    io.emit('gameEnded');
+    return;
+  }
+
+  // Finn neste spiller som faktisk har pucker igjen
+  let attempts = 0;
+  while (attempts < activeList.length) {
+    const candidate = activeList[gameState.activePlayerIndex % activeList.length];
+    if ((gameState.pucksLeft[candidate.uuid] || 0) > 0) {
+      io.emit('turnUpdate', { 
+        activeUuid: candidate.uuid, 
+        name: candidate.name,
+        pucksLeft: gameState.pucksLeft[candidate.uuid]
+      });
+      break;
+    }
+    gameState.activePlayerIndex++;
+    attempts++;
+  }
+}
 
 io.on('connection', (socket) => {
   socket.emit('boardConfigUpdate', boardConfig);
@@ -44,43 +84,63 @@ io.on('connection', (socket) => {
     io.emit('boardConfigUpdate', boardConfig);
   });
 
+  socket.on('setPucksPerPlayer', (count) => {
+    gameState.pucksPerPlayer = parseInt(count) || 4;
+    // Nullstill pucker for aktive spillere
+    const activeList = getActivePlayers();
+    activeList.forEach(p => {
+      gameState.pucksLeft[p.uuid] = gameState.pucksPerPlayer;
+    });
+    io.emit('gameStateUpdate', gameState);
+  });
+
   // --- SHUFFLEBOARD LOGIKK ---
   socket.on('shootPuck', ({ vx, vy }) => {
-    const playerList = Object.values(players).filter(p => p.connected);
-    if (playerList.length === 0) return;
+    if (gameState.gameEnded) return;
 
-    const currentPlayer = playerList[gameState.activePlayerIndex % playerList.length];
-    if (socket.playerUuid !== currentPlayer.uuid) return; // Kun den aktive spillerens tur
+    const activeList = getActivePlayers();
+    if (activeList.length === 0) return;
+
+    const currentPlayer = activeList[gameState.activePlayerIndex % activeList.length];
+    if (socket.playerUuid !== currentPlayer.uuid) return;
+
+    if ((gameState.pucksLeft[currentPlayer.uuid] || 0) <= 0) return;
+
+    // Trekk fra en puck
+    gameState.pucksLeft[currentPlayer.uuid]--;
 
     const newPuck = {
       id: uuidv4(),
       playerUuid: socket.playerUuid,
       playerName: currentPlayer.name,
       color: currentPlayer.color,
-      x: 50,  // Starter på midten nederst (50% X)
-      y: 95,  // Near bottom (95% Y)
-      vx: vx, // Hastighet X
-      vy: vy, // Hastighet Y
+      x: 50,
+      y: 95,
+      vx: vx,
+      vy: vy,
       stopped: false
     };
 
     io.emit('puckShot', newPuck);
 
-    // Neste spillers tur
+    // Gå videre til neste spiller
     gameState.activePlayerIndex++;
-    const nextPlayer = playerList[gameState.activePlayerIndex % playerList.length];
-    io.emit('turnUpdate', { activeUuid: nextPlayer.uuid, name: nextPlayer.name });
-  });
-
-  socket.on('updatePuckPositions', (pucks) => {
-    gameState.pucks = pucks;
-    io.emit('syncPucks', pucks);
+    checkNextTurnOrEnd();
   });
 
   socket.on('resetGame', () => {
     gameState.pucks = [];
     gameState.activePlayerIndex = 0;
+    gameState.gameEnded = false;
+    gameState.winnerMessage = '';
+    
+    const activeList = getActivePlayers();
+    activeList.forEach(p => {
+      gameState.pucksLeft[p.uuid] = gameState.pucksPerPlayer;
+    });
+
     io.emit('gameStateUpdate', gameState);
+    checkNextTurnOrEnd();
   });
 
   // --- SPILLERHÅNDTERING ---
@@ -99,14 +159,15 @@ io.on('connection', (socket) => {
       score: players[playerUuid]?.score || 0
     };
 
+    if (gameState.pucksLeft[playerUuid] === undefined) {
+      gameState.pucksLeft[playerUuid] = gameState.pucksPerPlayer;
+    }
+
     socket.playerUuid = playerUuid;
     socket.emit('sessionCreated', { uuid: playerUuid, name: players[playerUuid].name, color: players[playerUuid].color });
     
-    const activeList = Object.values(players).filter(p => p.connected);
-    const activePlayer = activeList[gameState.activePlayerIndex % activeList.length];
-    
     io.to('board_room').emit('playerListUpdate', Object.values(players));
-    io.emit('turnUpdate', { activeUuid: activePlayer?.uuid, name: activePlayer?.name });
+    checkNextTurnOrEnd();
   });
 
   socket.on('disconnect', () => {

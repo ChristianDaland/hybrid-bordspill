@@ -73,17 +73,27 @@
       document.getElementById('welcomeMsg').textContent = name;
     });
 
-    socket.on('turnUpdate', ({ activeUuid, name }) => {
+    socket.on('turnUpdate', ({ activeUuid, name, pucksLeft }) => {
       isMyTurn = (activeUuid === myUuid);
       if (isMyTurn) {
-        turnBadge.textContent = "DET ER DIN TUR!";
+        turnBadge.textContent = `DET ER DIN TUR! (${pucksLeft} puck(er) igjen)`;
         turnBadge.style.background = "#2ecc71";
         turnBadge.style.color = "#000";
+        handle.style.opacity = "1";
       } else {
         turnBadge.textContent = `Venter på ${name}...`;
         turnBadge.style.background = "#333";
         turnBadge.style.color = "#fff";
+        handle.style.opacity = "0.5";
       }
+    });
+
+    socket.on('gameEnded', () => {
+      isMyTurn = false;
+      turnBadge.textContent = "RUNDEN ER FERDIG!";
+      turnBadge.style.background = "#f1c40f";
+      turnBadge.style.color = "#000";
+      handle.style.opacity = "0.3";
     });
 
     // BERØRINGS- OG DRAG-KONTROLL
@@ -121,11 +131,9 @@
         const dy = parseFloat(matches[2]);
 
         if (dy > 10) {
-          // Lavere hastighetsmultiplikatorer for bedre presisjon
           let vx = -dx * 0.025;
           let vy = -dy * 0.035;
 
-          // Maksimal hastighetssperre
           const maxSpeed = 3.5;
           const currentSpeed = Math.hypot(vx, vy);
           if (currentSpeed > maxSpeed) {

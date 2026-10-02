@@ -10,7 +10,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background-color: #121212; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; display: flex; height: 100vh; }
     #sidebar { width: 320px; background: #1e1e1e; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-right: 2px solid #333; z-index: 10; }
-    #board-container { flex: 1; display: flex; justify-content: center; align-items: center; background: #0a0a0c; padding: 20px; }
+    #board-container { flex: 1; display: flex; justify-content: center; align-items: center; background: #0a0a0c; padding: 20px; position: relative; }
     canvas { background: #d4a373; border: 8px solid #5c3a21; border-radius: 8px; box-shadow: 0 0 30px rgba(0,0,0,0.9); cursor: crosshair; }
     .qr-box { background: #fff; padding: 8px; border-radius: 8px; display: flex; justify-content: center; align-items: center; min-height: 136px; }
     .player-list { list-style: none; margin-top: 8px; }
@@ -33,6 +33,22 @@
     .mode-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
     .mode-edit { background: #f39c12; color: #000; }
     .mode-play { background: #2ecc71; color: #000; }
+
+    /* Vinner-skjerm popup */
+    #winnerOverlay {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(20, 20, 25, 0.95);
+      border: 3px solid #f39c12;
+      border-radius: 12px;
+      padding: 30px;
+      text-align: center;
+      box-shadow: 0 0 40px rgba(0,0,0,0.8);
+      display: none;
+      z-index: 100;
+      min-width: 320px;
+    }
   </style>
 </head>
 <body>
@@ -58,6 +74,9 @@
       
       <hr style="border: 0.5px solid #333; margin: 4px 0;">
 
+      <label style="font-size: 0.85em;">Pucker per spiller: <span id="puckCountVal">4</span></label>
+      <input type="range" id="puckSlider" min="1" max="10" value="4">
+
       <label style="font-size: 0.85em;">Bordbredde (%): <span id="wVal">100</span></label>
       <input type="range" id="wSlider" min="50" max="100" value="100">
 
@@ -72,6 +91,12 @@
 
   <div id="board-container">
     <canvas id="boardCanvas"></canvas>
+
+    <div id="winnerOverlay">
+      <h2 style="color: #f1c40f; font-size: 2rem; margin-bottom: 10px;">🏆 RESULTAT 🏆</h2>
+      <div id="winnerText" style="font-size: 1.2rem; margin-bottom: 20px;"></div>
+      <button id="restartGameBtn" class="btn btn-green">Start Ny Runde</button>
+    </div>
   </div>
 
   <script>
@@ -79,14 +104,19 @@
     const canvas = document.getElementById('boardCanvas');
     const ctx = canvas.getContext('2d');
     const wSlider = document.getElementById('wSlider');
+    const puckSlider = document.getElementById('puckSlider');
     const saveBtn = document.getElementById('saveObstaclesBtn');
     const editBtn = document.getElementById('editObstaclesBtn');
     const clearBtn = document.getElementById('clearBtn');
     const resetBtn = document.getElementById('resetBtn');
+    const restartGameBtn = document.getElementById('restartGameBtn');
     const modeBadge = document.getElementById('modeBadge');
+    const winnerOverlay = document.getElementById('winnerOverlay');
+    const winnerText = document.getElementById('winnerText');
 
     let boardConfig = { widthRatio: 100, obstacles: [] };
     let pucks = [];
+    let playerListGlobal = [];
     const PUCK_RADIUS = 18;
 
     let isEditMode = true;
@@ -105,46 +135,34 @@
       }
     }
 
-    // Lyd for treff mot glass (Lys pling)
     function playGlassSound() {
       initAudio();
       if (!audioCtx) return;
-
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 tone
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(1760, audioCtx.currentTime + 0.1);
-
       gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
-
       osc.connect(gain);
       gain.connect(audioCtx.destination);
-
       osc.start();
       osc.stop(audioCtx.currentTime + 0.35);
     }
 
-    // Lyd for treff mellom to baller (Klikk)
     function playBallClickSound() {
       initAudio();
       if (!audioCtx) return;
-
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(400, audioCtx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.05);
-
       gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
-
       osc.connect(gain);
       gain.connect(audioCtx.destination);
-
       osc.start();
       osc.stop(audioCtx.currentTime + 0.05);
     }
@@ -177,6 +195,11 @@
       socket.emit('updateBoardConfig', { widthRatio: e.target.value });
     });
 
+    puckSlider.addEventListener('input', (e) => {
+      document.getElementById('puckCountVal').textContent = e.target.value;
+      socket.emit('setPucksPerPlayer', e.target.value);
+    });
+
     function getCanvasCoords(e) {
       const rect = canvas.getBoundingClientRect();
       const xPx = e.clientX - rect.left;
@@ -207,12 +230,7 @@
       if (hit) {
         draggedObstacle = hit;
       } else {
-        const newObs = {
-          x: coords.xPercent,
-          y: coords.yPercent,
-          radius: 40,
-          label: 'Glass'
-        };
+        const newObs = { x: coords.xPercent, y: coords.yPercent, radius: 40, label: 'Glass' };
         boardConfig.obstacles.push(newObs);
         draggedObstacle = newObs;
       }
@@ -230,15 +248,12 @@
       canvas.style.cursor = isEditMode ? (hoveredObstacle ? 'move' : 'crosshair') : 'default';
     });
 
-    window.addEventListener('mouseup', () => {
-      draggedObstacle = null;
-    });
+    window.addEventListener('mouseup', () => { draggedObstacle = null; });
 
     canvas.addEventListener('wheel', (e) => {
       if (!isEditMode) return;
       const coords = getCanvasCoords(e);
       const target = findObstacleAt(coords.xPx, coords.yPx) || hoveredObstacle;
-
       if (target) {
         e.preventDefault();
         const delta = e.deltaY < 0 ? 3 : -3;
@@ -280,6 +295,10 @@
     });
 
     resetBtn.addEventListener('click', () => socket.emit('resetGame'));
+    restartGameBtn.addEventListener('click', () => {
+      winnerOverlay.style.display = 'none';
+      socket.emit('resetGame');
+    });
 
     socket.on('boardConfigUpdate', (cfg) => {
       boardConfig = cfg;
@@ -300,23 +319,17 @@
 
     socket.on('gameStateUpdate', (gs) => {
       pucks = gs.pucks || [];
-      pucks.forEach(p => {
-        if (p.px === undefined) {
-          p.px = (p.x / 100) * canvas.width;
-          p.py = (p.y / 100) * canvas.height;
-          p.vxPx = ((p.vx || 0) / 100) * canvas.width;
-          p.vyPx = ((p.vy || 0) / 100) * canvas.height;
-        }
-        p.lastGlassHit = 0;
-        p.lastPuckHit = 0;
-      });
+      if (!gs.gameEnded) {
+        winnerOverlay.style.display = 'none';
+      }
     });
 
-    socket.on('turnUpdate', ({ name }) => {
-      document.getElementById('turnName').textContent = name || 'Ingen';
+    socket.on('turnUpdate', ({ name, pucksLeft }) => {
+      document.getElementById('turnName').textContent = `${name} (${pucksLeft} igjen)`;
     });
 
     socket.on('playerListUpdate', (players) => {
+      playerListGlobal = players;
       const list = document.getElementById('players');
       list.innerHTML = '';
       players.forEach(p => {
@@ -326,6 +339,94 @@
         </li>`;
       });
     });
+
+    socket.on('gameEnded', () => {
+      setTimeout(calculateFinalScores, 1500); // Vent 1.5 sekunder så siste puck stopper
+    });
+
+    // --- BEREGN POENG OG KAUR VINNER HELT TIL SLUTT ---
+    function calculateFinalScores() {
+      const zoneH = canvas.height * 0.08;
+      const playerScores = {};
+      const playerPuckCounts = {};
+
+      playerListGlobal.forEach(p => {
+        playerScores[p.uuid] = 0;
+        playerPuckCounts[p.uuid] = 0;
+      });
+
+      pucks.forEach(p => {
+        if (!playerScores[p.playerUuid] === undefined) return;
+
+        playerPuckCounts[p.playerUuid] = (playerPuckCounts[p.playerUuid] || 0) + 1;
+
+        // Sjekk hvilken poengsone pucken ligger i
+        if (p.py >= 0 && p.py < zoneH) {
+          playerScores[p.playerUuid] += 4;
+        } else if (p.py >= zoneH && p.py < zoneH * 2) {
+          playerScores[p.playerUuid] += 3;
+        } else if (p.py >= zoneH * 2 && p.py < zoneH * 3) {
+          playerScores[p.playerUuid] += 2;
+        } else if (p.py >= zoneH * 3 && p.py < zoneH * 4) {
+          playerScores[p.playerUuid] += 1;
+        }
+      });
+
+      // Finn max poeng
+      let maxScore = -1;
+      let scoreWinners = [];
+
+      Object.keys(playerScores).forEach(uuid => {
+        const score = playerScores[uuid];
+        if (score > maxScore) {
+          maxScore = score;
+          scoreWinners = [uuid];
+        } else if (score === maxScore && maxScore > 0) {
+          scoreWinners.push(uuid);
+        }
+      });
+
+      let winnerHtml = "";
+
+      if (maxScore > 0) {
+        if (scoreWinners.length === 1) {
+          const winner = playerListGlobal.find(p => p.uuid === scoreWinners[0]);
+          winnerHtml = `<p>Vinneren er <b style="color:${winner.color}">${winner.name}</b> med <b>${maxScore} poeng</b>!</p>`;
+        } else {
+          const winnerNames = scoreWinners.map(id => playerListGlobal.find(p => p.uuid === id)?.name).join(' & ');
+          winnerHtml = `<p>Uavgjort! Delt seier mellom <b>${winnerNames}</b> med <b>${maxScore} poeng</b>!</p>`;
+        }
+      } else {
+        // Dersom INGEN fikk poeng i poengsonene, tell antall pucker på bordet
+        let maxPucks = -1;
+        let puckWinners = [];
+
+        Object.keys(playerPuckCounts).forEach(uuid => {
+          const count = playerPuckCounts[uuid];
+          if (count > maxPucks) {
+            maxPucks = count;
+            puckWinners = [uuid];
+          } else if (count === maxPucks && maxPucks > 0) {
+            puckWinners.push(uuid);
+          }
+        });
+
+        if (maxPucks > 0) {
+          if (puckWinners.length === 1) {
+            const winner = playerListGlobal.find(p => p.uuid === puckWinners[0]);
+            winnerHtml = `<p>Ingen traff poengsonene! Vinneren er <b style="color:${winner.color}">${winner.name}</b> med flest pucker på bordet (<b>${maxPucks} pucker</b>)!</p>`;
+          } else {
+            const winnerNames = puckWinners.map(id => playerListGlobal.find(p => p.uuid === id)?.name).join(' & ');
+            winnerHtml = `<p>Ingen traff poengsonene! Delt seier mellom <b>${winnerNames}</b> med <b>${maxPucks} pucker</b> på bordet!</p>`;
+          }
+        } else {
+          winnerHtml = `<p>Ingen pucker igjen på bordet! Ingen vinner denne runden.</p>`;
+        }
+      }
+
+      winnerText.innerHTML = winnerHtml;
+      winnerOverlay.style.display = 'block';
+    }
 
     function updatePhysics() {
       const friction = 0.988;
@@ -342,7 +443,6 @@
           p.vyPx *= friction;
         }
 
-        // Kollisjon med hindringer (Glass)
         boardConfig.obstacles.forEach(obs => {
           const obsX = (obs.x / 100) * canvas.width;
           const obsY = (obs.y / 100) * canvas.height;
@@ -356,7 +456,6 @@
             p.vxPx = Math.cos(angle) * speed * 0.7;
             p.vyPx = Math.sin(angle) * speed * 0.7;
 
-            // Spill av plass-lyd om det er over 120ms siden forrige treff
             if (!p.lastGlassHit || now - p.lastGlassHit > 120) {
               playGlassSound();
               p.lastGlassHit = now;
@@ -365,7 +464,6 @@
         });
       });
 
-      // Kollisjon mellom pucker
       for (let i = 0; i < pucks.length; i++) {
         for (let j = i + 1; j < pucks.length; j++) {
           const p1 = pucks[i];
@@ -395,7 +493,6 @@
             p2.vxPx += p * nx * 0.9;
             p2.vyPx += p * ny * 0.9;
 
-            // Spill av ball-klikk lyd
             if ((!p1.lastPuckHit || now - p1.lastPuckHit > 100) && (!p2.lastPuckHit || now - p2.lastPuckHit > 100)) {
               playBallClickSound();
               p1.lastPuckHit = now;
