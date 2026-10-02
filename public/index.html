@@ -78,7 +78,6 @@
       resizeCanvas();
     });
 
-    // Trygg QR-generering
     try {
       if (window.QRCode) {
         new QRCode(document.getElementById("qrcode"), { 
@@ -127,6 +126,14 @@
 
     socket.on('gameStateUpdate', (gs) => {
       pucks = gs.pucks || [];
+      pucks.forEach(p => {
+        if (p.px === undefined) {
+          p.px = (p.x / 100) * canvas.width;
+          p.py = (p.y / 100) * canvas.height;
+          p.vxPx = (p.vx || 0 / 100) * canvas.width;
+          p.vyPx = (p.vy || 0 / 100) * canvas.height;
+        }
+      });
     });
 
     socket.on('turnUpdate', ({ name }) => {
@@ -147,22 +154,28 @@
     function updatePhysics() {
       const friction = 0.988;
 
+      // 1. Oppdater posisjoner basert på hastighet
       pucks.forEach(p => {
         if (Math.abs(p.vxPx) < 0.05 && Math.abs(p.vyPx) < 0.05) {
-          p.vxPx = 0; p.vyPx = 0;
-          return;
+          p.vxPx = 0; 
+          p.vyPx = 0;
+        } else {
+          p.px += p.vxPx;
+          p.py += p.vyPx;
+          p.vxPx *= friction;
+          p.vyPx *= friction;
         }
 
-        p.px += p.vxPx;
-        p.py += p.vyPx;
-        p.vxPx *= friction;
-        p.vyPx *= friction;
-
-        if (p.px - PUCK_RADIUS < 0 || p.px + PUCK_RADIUS > canvas.width) {
+        // Veggkollisjon (Sidekantene)
+        if (p.px - PUCK_RADIUS < 0) {
+          p.px = PUCK_RADIUS;
           p.vxPx *= -0.8;
-          p.px = Math.max(PUCK_RADIUS, Math.min(canvas.width - PUCK_RADIUS, p.px));
+        } else if (p.px + PUCK_RADIUS > canvas.width) {
+          p.px = canvas.width - PUCK_RADIUS;
+          p.vxPx *= -0.8;
         }
 
+        // Kollisjon med hindringer (Glass)
         boardConfig.obstacles.forEach(obs => {
           const obsX = (obs.x / 100) * canvas.width;
           const obsY = (obs.y / 100) * canvas.height;
@@ -178,14 +191,47 @@
           }
         });
       });
+
+      // 2. Kollisjon mellom pucker (2D Elastisk støt)
+      for (let i = 0; i < pucks.length; i++) {
+        for (let j = i + 1; j < pucks.length; j++) {
+          const p1 = pucks[i];
+          const p2 = pucks[j];
+
+          const dx = p2.px - p1.px;
+          const dy = p2.py - p1.py;
+          const dist = Math.hypot(dx, dy);
+          const minDist = PUCK_RADIUS * 2;
+
+          if (dist < minDist && dist > 0) {
+            // Unngå overlapping ved å skyve dem litt fra hverandre
+            const overlap = (minDist - dist) / 2;
+            const nx = dx / dist;
+            const ny = dy / dist;
+
+            p1.px -= nx * overlap;
+            p1.py -= ny * overlap;
+            p2.px += nx * overlap;
+            p2.py += ny * overlap;
+
+            // Beregn elastisk kollisjon
+            const kx = p1.vxPx - p2.vxPx;
+            const ky = p1.vyPx - p2.vyPx;
+            const p = 2 * (nx * kx + ny * ky) / 2; // Like tung masse for begge pucker
+
+            p1.vxPx -= p * nx * 0.9; // 0.9 for litt energitap i kollisjonen
+            p1.vyPx -= p * ny * 0.9;
+            p2.vxPx += p * nx * 0.9;
+            p2.vyPx += p * ny * 0.9;
+          }
+        }
+      }
     }
 
     function draw() {
-      // Tøm lerretet med trebaneanimasjon/bakgrunn
       ctx.fillStyle = '#d4a373';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Tegn Poengsoner (Øverst på banen)
       const zoneH = canvas.height * 0.08;
       const zones = [
         { name: '4 Poeng', color: 'rgba(230, 126, 34, 0.4)', y: 0 },
@@ -206,7 +252,6 @@
         ctx.fillText(z.name, canvas.width / 2, z.y + zoneH / 1.5);
       });
 
-      // Tegn Hindringer (Glass)
       boardConfig.obstacles.forEach(obs => {
         const ox = (obs.x / 100) * canvas.width;
         const oy = (obs.y / 100) * canvas.height;
@@ -222,7 +267,6 @@
         ctx.fillText('GLASS', ox, oy + 4);
       });
 
-      // Tegn Pucker
       pucks.forEach(p => {
         ctx.beginPath();
         ctx.arc(p.px, p.py, PUCK_RADIUS, 0, Math.PI * 2);
@@ -237,7 +281,6 @@
       requestAnimationFrame(draw);
     }
 
-    // Start opp tegning
     resizeCanvas();
     requestAnimationFrame(draw);
   </script>
