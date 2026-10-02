@@ -130,8 +130,8 @@
         if (p.px === undefined) {
           p.px = (p.x / 100) * canvas.width;
           p.py = (p.y / 100) * canvas.height;
-          p.vxPx = (p.vx || 0 / 100) * canvas.width;
-          p.vyPx = (p.vy || 0 / 100) * canvas.height;
+          p.vxPx = ((p.vx || 0) / 100) * canvas.width;
+          p.vyPx = ((p.vy || 0) / 100) * canvas.height;
         }
       });
     });
@@ -154,7 +154,7 @@
     function updatePhysics() {
       const friction = 0.988;
 
-      // 1. Oppdater posisjoner basert på hastighet
+      // 1. Oppdater posisjoner og sjekk om pucken faller utfor kanten
       pucks.forEach(p => {
         if (Math.abs(p.vxPx) < 0.05 && Math.abs(p.vyPx) < 0.05) {
           p.vxPx = 0; 
@@ -166,16 +166,7 @@
           p.vyPx *= friction;
         }
 
-        // Veggkollisjon (Sidekantene)
-        if (p.px - PUCK_RADIUS < 0) {
-          p.px = PUCK_RADIUS;
-          p.vxPx *= -0.8;
-        } else if (p.px + PUCK_RADIUS > canvas.width) {
-          p.px = canvas.width - PUCK_RADIUS;
-          p.vxPx *= -0.8;
-        }
-
-        // Kollisjon med hindringer (Glass)
+        // Kollisjon med hindringer (Glass) på bordet
         boardConfig.obstacles.forEach(obs => {
           const obsX = (obs.x / 100) * canvas.width;
           const obsY = (obs.y / 100) * canvas.height;
@@ -204,7 +195,6 @@
           const minDist = PUCK_RADIUS * 2;
 
           if (dist < minDist && dist > 0) {
-            // Unngå overlapping ved å skyve dem litt fra hverandre
             const overlap = (minDist - dist) / 2;
             const nx = dx / dist;
             const ny = dy / dist;
@@ -214,18 +204,26 @@
             p2.px += nx * overlap;
             p2.py += ny * overlap;
 
-            // Beregn elastisk kollisjon
             const kx = p1.vxPx - p2.vxPx;
             const ky = p1.vyPx - p2.vyPx;
-            const p = 2 * (nx * kx + ny * ky) / 2; // Like tung masse for begge pucker
+            const p = 2 * (nx * kx + ny * ky) / 2;
 
-            p1.vxPx -= p * nx * 0.9; // 0.9 for litt energitap i kollisjonen
+            p1.vxPx -= p * nx * 0.9;
             p1.vyPx -= p * ny * 0.9;
             p2.vxPx += p * nx * 0.9;
             p2.vyPx += p * ny * 0.9;
           }
         }
       }
+
+      // 3. Fjern pucker hvis mer enn halvparten av pucken er ute over kanten (eller sentrum er utenfor)
+      pucks = pucks.filter(p => {
+        const outsideLeft = p.px < 0;
+        const outsideRight = p.px > canvas.width;
+        const outsideTop = p.py < 0;
+        const outsideBottom = p.py > canvas.height;
+        return !(outsideLeft || outsideRight || outsideTop || outsideBottom);
+      });
     }
 
     function draw() {
