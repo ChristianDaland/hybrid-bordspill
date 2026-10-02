@@ -7,34 +7,29 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+  cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// Global tilstand for bordkonfigurasjon og aktuelt spill
+// Global tilstand for bordkonfigurasjon
 let boardConfig = {
-  widthRatio: 100, // Prosent av skjermbredde
-  obstacles: [],   // Døde soner/hindringer på bordet (f.eks. glass)
-  activeGame: 'default'
+  widthRatio: 100,
+  heightRatio: 100,
+  obstacles: [] // Array med { id, x, y, radius, label }
 };
 
-let players = {}; // uuid -> { id, name, socketId, connected, score }
+let players = {};
 
 io.on('connection', (socket) => {
   console.log('Ny tilkobling:', socket.id);
 
-  // Send nåværende bordoppsett til nylig tilkoblede klienter
   socket.emit('boardConfigUpdate', boardConfig);
 
-  // --- BORD / STORSKJERM HÅNDTERING ---
+  // --- STORSKJERM / BORD ---
   socket.on('registerBoard', () => {
     socket.join('board_room');
-    console.log('Storskjerm registrert i board_room');
     socket.emit('playerListUpdate', Object.values(players));
   });
 
@@ -43,7 +38,18 @@ io.on('connection', (socket) => {
     io.emit('boardConfigUpdate', boardConfig);
   });
 
-  // --- MOBIL / SPILLER HÅNDTERING ---
+  socket.on('addObstacle', (obstacle) => {
+    obstacle.id = uuidv4();
+    boardConfig.obstacles.push(obstacle);
+    io.emit('boardConfigUpdate', boardConfig);
+  });
+
+  socket.on('clearObstacles', () => {
+    boardConfig.obstacles = [];
+    io.emit('boardConfigUpdate', boardConfig);
+  });
+
+  // --- MOBIL / SPILLER ---
   socket.on('joinGame', ({ uuid, name }) => {
     const playerUuid = uuid || uuidv4();
     
@@ -57,16 +63,13 @@ io.on('connection', (socket) => {
 
     socket.playerUuid = playerUuid;
     socket.emit('sessionCreated', { uuid: playerUuid, name: players[playerUuid].name });
-    
     io.to('board_room').emit('playerListUpdate', Object.values(players));
-    console.log(`Spiller tilkoblet: ${players[playerUuid].name} (${playerUuid})`);
   });
 
   socket.on('disconnect', () => {
     if (socket.playerUuid && players[socket.playerUuid]) {
       players[socket.playerUuid].connected = false;
       io.to('board_room').emit('playerListUpdate', Object.values(players));
-      console.log(`Spiller frakoblet: ${players[socket.playerUuid].name}`);
     }
   });
 });

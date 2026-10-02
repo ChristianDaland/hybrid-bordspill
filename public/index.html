@@ -22,8 +22,9 @@
       padding: 20px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
       border-right: 2px solid #333;
+      z-index: 10;
     }
     #game-board-container {
       flex: 1;
@@ -38,8 +39,10 @@
       border: 4px solid #4a90e2;
       border-radius: 12px;
       height: 90vh;
-      transition: width 0.3s ease;
+      transition: width 0.2s ease, height 0.2s ease;
       position: relative;
+      cursor: crosshair;
+      overflow: hidden;
     }
     .qr-box {
       background: #fff;
@@ -48,7 +51,7 @@
       display: flex;
       justify-content: center;
     }
-    .player-list { list-style: none; margin-top: 10px; }
+    .player-list { list-style: none; margin-top: 5px; }
     .player-item {
       padding: 8px 12px;
       background: #2a2a2a;
@@ -56,6 +59,7 @@
       border-radius: 6px;
       display: flex;
       justify-content: space-between;
+      align-items: center;
     }
     .status-dot {
       width: 10px;
@@ -65,8 +69,35 @@
     }
     .online { background: #4caf50; }
     .offline { background: #f44336; }
-    .control-group { display: flex; flex-direction: column; gap: 8px; }
+    .control-group { display: flex; flex-direction: column; gap: 6px; }
     input[type=range] { width: 100%; }
+    
+    button {
+      padding: 10px;
+      background: #e74c3c;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { background: #c0392b; }
+
+    /* Hindring / Død sone (Glass) */
+    .obstacle {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(231, 76, 60, 0.4);
+      border: 2px dashed #e74c3c;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -77,22 +108,35 @@
     <div class="qr-box">
       <div id="qrcode"></div>
     </div>
-    <p style="text-align: center; font-size: 0.85em; color: #aaa;">Skann for å bli med</p>
+    <p style="text-align: center; font-size: 0.8em; color: #aaa;">Skann for å bli med</p>
 
     <div class="control-group">
-      <label for="widthSlider">Bordbredde (%): <span id="widthVal">100</span>%</label>
+      <label for="widthSlider">Bordbredde: <span id="widthVal">100</span>%</label>
       <input type="range" id="widthSlider" min="50" max="100" value="100">
     </div>
 
+    <div class="control-group">
+      <label for="heightSlider">Bordhøyde: <span id="heightVal">90</span>vh</label>
+      <input type="range" id="heightSlider" min="40" max="95" value="90">
+    </div>
+
+    <div class="control-group">
+      <label for="glassSize">Glassstørrelse (px): <span id="glassVal">80</span>px</label>
+      <input type="range" id="glassSize" min="40" max="200" value="80">
+      <p style="font-size: 0.75em; color: #888;">Klikk på bordet for å plassere et glass / hindring.</p>
+    </div>
+
+    <button id="clearBtn">Fjern alle hindringer</button>
+
     <div>
-      <h3>Tilkoblede spillere</h3>
+      <h3>Spillere</h3>
       <ul id="players" class="player-list"></ul>
     </div>
   </div>
 
   <div id="game-board-container">
-    <div id="game-board" style="width: 90%;">
-      <!-- Spillområde og hindringer rendres her -->
+    <div id="game-board" style="width: 100%; height: 90vh;">
+      <!-- Hindringer og spillobjekter rendres her -->
     </div>
   </div>
 
@@ -100,31 +144,77 @@
     const socket = io();
     const board = document.getElementById('game-board');
     const widthSlider = document.getElementById('widthSlider');
+    const heightSlider = document.getElementById('heightSlider');
     const widthVal = document.getElementById('widthVal');
+    const heightVal = document.getElementById('heightVal');
+    const glassSizeInput = document.getElementById('glassSize');
+    const glassVal = document.getElementById('glassVal');
+    const clearBtn = document.getElementById('clearBtn');
     const playerList = document.getElementById('players');
 
-    // Generer QR-kode for mobil.html
+    // Generer QR-kode
     const joinUrl = `${window.location.origin}/mobile.html`;
-    new QRCode(document.getElementById("qrcode"), {
-      text: joinUrl,
-      width: 160,
-      height: 160
-    });
+    new QRCode(document.getElementById("qrcode"), { text: joinUrl, width: 140, height: 140 });
 
     socket.emit('registerBoard');
 
-    // Bordjustering
+    // Dimensjonskontroll
     widthSlider.addEventListener('input', (e) => {
-      const val = e.target.value;
-      widthVal.textContent = val;
-      board.style.width = `${val}%`;
-      socket.emit('updateBoardConfig', { widthRatio: val });
+      widthVal.textContent = e.target.value;
+      board.style.width = `${e.target.value}%`;
+      socket.emit('updateBoardConfig', { widthRatio: e.target.value });
     });
 
+    heightSlider.addEventListener('input', (e) => {
+      heightVal.textContent = e.target.value;
+      board.style.height = `${e.target.value}vh`;
+      socket.emit('updateBoardConfig', { heightRatio: e.target.value });
+    });
+
+    glassSizeInput.addEventListener('input', (e) => {
+      glassVal.textContent = e.target.value;
+    });
+
+    // Legg til hindring ved klikk på bordet
+    board.addEventListener('click', (e) => {
+      const rect = board.getBoundingClientRect();
+      const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
+      const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
+      const radiusPx = parseInt(glassSizeInput.value) / 2;
+
+      socket.emit('addObstacle', {
+        x: xPercent,
+        y: yPercent,
+        radius: radiusPx,
+        label: 'Glass'
+      });
+    });
+
+    clearBtn.addEventListener('click', () => {
+      socket.emit('clearObstacles');
+    });
+
+    // Oppdatering fra server
     socket.on('boardConfigUpdate', (config) => {
       board.style.width = `${config.widthRatio}%`;
+      board.style.height = `${config.heightRatio}vh`;
       widthSlider.value = config.widthRatio;
+      heightSlider.value = config.heightRatio;
       widthVal.textContent = config.widthRatio;
+      heightVal.textContent = config.heightRatio;
+
+      // Render hindringer
+      document.querySelectorAll('.obstacle').forEach(el => el.remove());
+      config.obstacles.forEach(obs => {
+        const div = document.createElement('div');
+        div.className = 'obstacle';
+        div.style.left = `${obs.x}%`;
+        div.style.top = `${obs.y}%`;
+        div.style.width = `${obs.radius * 2}px`;
+        div.style.height = `${obs.radius * 2}px`;
+        div.textContent = obs.label || '';
+        board.appendChild(div);
+      });
     });
 
     socket.on('playerListUpdate', (players) => {
