@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hybrid Bordspill - Hovedskjerm</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #121212;
+      color: #ffffff;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+      display: flex;
+      height: 100vh;
+    }
+    #sidebar {
+      width: 320px;
+      background: #1e1e1e;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      border-right: 2px solid #333;
+    }
+    #game-board-container {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #000;
+      position: relative;
+    }
+    #game-board {
+      background: #1a2634;
+      border: 4px solid #4a90e2;
+      border-radius: 12px;
+      height: 90vh;
+      transition: width 0.3s ease;
+      position: relative;
+    }
+    .qr-box {
+      background: #fff;
+      padding: 10px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: center;
+    }
+    .player-list { list-style: none; margin-top: 10px; }
+    .player-item {
+      padding: 8px 12px;
+      background: #2a2a2a;
+      margin-bottom: 6px;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .online { background: #4caf50; }
+    .offline { background: #f44336; }
+    .control-group { display: flex; flex-direction: column; gap: 8px; }
+    input[type=range] { width: 100%; }
+  </style>
+</head>
+<body>
+
+  <div id="sidebar">
+    <h2>Hybrid Bordspill</h2>
+    
+    <div class="qr-box">
+      <div id="qrcode"></div>
+    </div>
+    <p style="text-align: center; font-size: 0.85em; color: #aaa;">Skann for å bli med</p>
+
+    <div class="control-group">
+      <label for="widthSlider">Bordbredde (%): <span id="widthVal">100</span>%</label>
+      <input type="range" id="widthSlider" min="50" max="100" value="100">
+    </div>
+
+    <div>
+      <h3>Tilkoblede spillere</h3>
+      <ul id="players" class="player-list"></ul>
+    </div>
+  </div>
+
+  <div id="game-board-container">
+    <div id="game-board" style="width: 90%;">
+      <!-- Spillområde og hindringer rendres her -->
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    const board = document.getElementById('game-board');
+    const widthSlider = document.getElementById('widthSlider');
+    const widthVal = document.getElementById('widthVal');
+    const playerList = document.getElementById('players');
+
+    // Generer QR-kode for mobil.html
+    const joinUrl = `${window.location.origin}/mobile.html`;
+    new QRCode(document.getElementById("qrcode"), {
+      text: joinUrl,
+      width: 160,
+      height: 160
+    });
+
+    socket.emit('registerBoard');
+
+    // Bordjustering
+    widthSlider.addEventListener('input', (e) => {
+      const val = e.target.value;
+      widthVal.textContent = val;
+      board.style.width = `${val}%`;
+      socket.emit('updateBoardConfig', { widthRatio: val });
+    });
+
+    socket.on('boardConfigUpdate', (config) => {
+      board.style.width = `${config.widthRatio}%`;
+      widthSlider.value = config.widthRatio;
+      widthVal.textContent = config.widthRatio;
+    });
+
+    socket.on('playerListUpdate', (players) => {
+      playerList.innerHTML = '';
+      players.forEach(p => {
+        const li = document.createElement('li');
+        li.className = 'player-item';
+        li.innerHTML = `
+          <span>${p.name}</span>
+          <span class="status-dot ${p.connected ? 'online' : 'offline'}"></span>
+        `;
+        playerList.appendChild(li);
+      });
+    });
+  </script>
+</body>
+</html>
