@@ -32,7 +32,7 @@ let saveTimer = null;
 function scheduleSave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    const data = { hostPin, config: game.config, settings: game.settings };
+    const data = { hostPin, config: game.config, settings: game.settings, records: game.records };
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFile(SAVE_FILE, JSON.stringify(data, null, 2), (err) => {
       if (err) console.error('Kunne ikke lagre oppsettet:', err.message);
@@ -43,6 +43,7 @@ function scheduleSave() {
 const game = new Game({
   config: saved.config,
   settings: saved.settings,
+  records: saved.records,
   onSave: scheduleSave,
   emit: (event, payload, room) => {
     if (room === 'boards') io.to('board_room').emit(event, payload);
@@ -119,6 +120,7 @@ io.on('connection', (socket) => {
   hostOn('setConfig', (config) => game.setConfig(config));
   hostOn('setSettings', (settings) => game.setSettings(settings));
   hostOn('addBot', () => game.addBot());
+  hostOn('resetRecords', () => game.resetRecords());
   hostOn('resetToLobby', () => game.resetToLobby());
   hostOn('hostStart', () => game.start());
   hostOn('hostNext', () => game.next());
@@ -147,6 +149,7 @@ io.on('connection', (socket) => {
 
   playerOn('aim', (id, input) => game.aim(id, input));
   playerOn('shoot', (id, input) => game.shoot(id, input));
+  playerOn('practice', (id, input) => game.practice(id, input));
   playerOn('react', (id, emoji) => game.react(id, emoji));
   playerOn('start', () => game.start());
   playerOn('next', () => game.next());

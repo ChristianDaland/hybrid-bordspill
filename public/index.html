@@ -74,6 +74,11 @@
 
     #twistName { font-family: var(--display); font-size: 1.5rem; color: var(--brass); margin-top: 2px; }
     #twistText { color: var(--muted); font-size: .92rem; margin-top: 4px; }
+    #records { list-style: none; display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+    #records li { display: flex; justify-content: space-between; gap: 8px; font-size: .92rem; }
+    #records span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #records span:last-child { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .row.team { background: #0005; font-weight: 700; grid-template-columns: 16px minmax(0, 1fr) auto; }
     #feedCard { flex: 1; min-height: 0; overflow: hidden; }
     #feed { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
     #feed li { font-size: .93rem; color: var(--muted); }
@@ -168,7 +173,13 @@
             </select>
           </label>
           <label class="inline"><input type="checkbox" id="twistCheck"> Rundens vri fra runde 2</label>
-          <div class="note">Puck- og vriendringer gjelder fra neste runde.</div>
+          <label class="inline"><input type="checkbox" id="teamCheck"> Lagspill med to lag</label>
+          <label>Robotnivå
+            <select id="botSelect">
+              <option value="easy">Lett</option><option value="medium">Middels</option><option value="hard">Proff</option>
+            </select>
+          </label>
+          <div class="note">Puck- og vriendringer gjelder fra neste runde, lagspill fra neste kamp.</div>
 
           <hr style="border:0;border-top:1px solid var(--line)">
           <label><span>Bordbredde: <b id="widthVal"></b> %</span><input type="range" id="widthSlider" min="50" max="100"></label>
@@ -181,6 +192,7 @@
           <button class="btn" id="botBtn">🤖 Legg til robot</button>
           <button class="btn" id="lobbyBtn">Avbryt og gå til lobbyen</button>
           <button class="btn danger" id="kickAllBtn">Kast ut alle</button>
+          <button class="btn danger" id="recordsBtn">Nullstill æresplassen</button>
         </div>
       </section>
     </aside>
@@ -198,6 +210,10 @@
         <div class="eyebrow">Rundens vri</div>
         <div id="twistName">Ikke startet</div>
         <div id="twistText">Skann koden og samle gjengen.</div>
+      </section>
+      <section class="card" id="recordsCard" hidden>
+        <div class="eyebrow">Æresplassen</div>
+        <ol id="records"></ol>
       </section>
       <section class="card" id="feedCard">
         <div class="eyebrow">Kommentatoren</div>

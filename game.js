@@ -21,7 +21,18 @@ const BOT_THINK_MS = 700;
 const BOT_AIM_STEPS = 12;
 const BOT_AIM_STEP_MS = 70;
 
-const DEFAULT_SETTINGS = { pucksPerPlayer: 4, rounds: 3, twists: true, shotClock: 45 };
+const DEFAULT_SETTINGS = { pucksPerPlayer: 4, rounds: 3, twists: true, shotClock: 45, botLevel: 'medium', teams: false };
+const BOT_LEVELS = {
+  easy: { tries: 8, shake: 0.16 },
+  medium: { tries: 48, shake: 0.05 },
+  hard: { tries: 120, shake: 0.015 },
+};
+const TEAMS = [
+  { name: 'Lag Rød', color: '#e5484d' },
+  { name: 'Lag Blå', color: '#3e8ef7' },
+];
+const MAX_RECORDS = 200;
+const TOP_RECORDS = 5;
 const SHOT_CLOCKS = [0, 20, 30, 45, 60];
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -40,6 +51,8 @@ function normalizeSettings(input = {}, base = DEFAULT_SETTINGS) {
     rounds: clamp(Math.round(Number(pick('rounds'))) || base.rounds, 1, 9),
     twists: Boolean(pick('twists')),
     shotClock: SHOT_CLOCKS.includes(shotClock) ? shotClock : base.shotClock,
+    botLevel: Object.hasOwn(BOT_LEVELS, pick('botLevel')) ? pick('botLevel') : base.botLevel,
+    teams: Boolean(pick('teams')),
   };
 }
 
@@ -91,7 +104,8 @@ const TWISTS = {
 };
 
 class Game {
-  constructor({ config, settings, emit, onSave, timeScale = 1, random = Math.random, now = Date.now }) {
+  constructor({ config, settings, records, emit, onSave, timeScale = 1, random = Math.random, now = Date.now }) {
+    this.records = Array.isArray(records) ? records : [];
     this.config = normalizeConfig(config);
     this.settings = normalizeSettings(settings);
     this.emit = emit;
@@ -134,7 +148,11 @@ class Game {
         total: p.total,
         roundScore: p.roundScore,
         pucksLeft: p.pucksLeft,
+        teamName: this.teamsActive ? TEAMS[p.team].name : null,
+        teamColor: this.teamsActive ? TEAMS[p.team].color : null,
       })),
+      teams: this.teamsActive ? this._teamRows() : null,
+      records: this._topRecords(),
       turn: this.turn && {
         playerId: this.turn.playerId,
         remainingMs: this.turn.deadline ? Math.max(0, this.turn.deadline - this.now()) : null,
@@ -208,6 +226,7 @@ class Game {
     this.twist = null;
     this.twistsUsed = new Set();
     this.bestShot = null;
+    this.teamsActive = false;
     this.world = this._emptyWorld();
     for (const p of this.players.values()) this._resetPlayerForMatch(p);
   }
@@ -216,6 +235,7 @@ class Game {
     p.total = 0;
     p.roundScore = 0;
     p.pucksLeft = 0;
+    p.team = null;
     p.stats = { shots: 0, knocks: 0, bullseyes: 0, banks: 0, falls: 0, bestValue: 0 };
   }
 
@@ -254,6 +274,7 @@ class Game {
       ...fields,
     };
     this._resetPlayerForMatch(player);
+    if (this.teamsActive) player.team = this._smallerTeam();
     this.players.set(player.id, player);
     if (['intro', 'aiming', 'rolling'].includes(this.phase)) {
       player.pucksLeft = this.settings.pucksPerPlayer;
@@ -341,7 +362,7 @@ class Game {
   // --- Kampforløp ---
 
   start() {
-    if (this.phase !== 'lobby' || this.players.size === 0) return;
+    if (!['lobby', 'practice'].includes(this.phase) || this.players.size === 0) return;
     this._startMatch();
   }
 
@@ -364,8 +385,63 @@ class Game {
     this.round = 0;
     this.twistsUsed = new Set();
     this.feed = [];
+    this.teamsActive = false;
     for (const p of this.players.values()) this._resetPlayerForMatch(p);
+    if (this.settings.teams && this.players.size >= 2) this._assignTeams();
     this._startRound();
+  }
+
+  // --- Lag ---
+
+  _assignTeams() {
+    const shuffled = [...this.players.values()]
+      .map((player) => ({ player, sort: this.random() }))
+      .sort((a, b) => a.sort - b.sort);
+    shuffled.forEach(({ player }, i) => { player.team = i % 2; });
+    this.teamsActive = true;
+  }
+
+  _smallerTeam() {
+    const sizes = [0, 0];
+    for (const p of this.players.values()) sizes[p.team]++;
+    return sizes[0] <= sizes[1] ? 0 : 1;
+  }
+
+  _isFoe(a, b) {
+    return this.teamsActive ? a.team !== b.team : a.id !== b.id;
+  }
+
+  _teamRows() {
+    const players = [...this.players.values()];
+    const onBoard = (id) => this.world.pucks.filter((p) => p.owner === id).length;
+    return TEAMS.map((team, index) => {
+      const members = players.filter((p) => p.team === index);
+      const sum = (read) => members.reduce((total, p) => total + read(p), 0);
+      return {
+        name: team.name,
+        color: team.color,
+        members: members.map((p) => p.name),
+        roundScore: sum((p) => p.roundScore),
+        total: sum((p) => p.total),
+        pucks: sum((p) => onBoard(p.id)),
+      };
+    }).sort((a, b) => b.total - a.total || b.roundScore - a.roundScore);
+  }
+
+  _turnOrder() {
+    const byTotal = [...this.players.values()].sort((a, b) => b.total - a.total);
+    if (!this.teamsActive) return byTotal.map((p) => p.id);
+
+    const teamTotal = (team) => byTotal.filter((p) => p.team === team).reduce((sum, p) => sum + p.total, 0);
+    const leader = teamTotal(0) >= teamTotal(1) ? 0 : 1;
+    const first = byTotal.filter((p) => p.team === leader);
+    const second = byTotal.filter((p) => p.team !== leader);
+    const order = [];
+    for (let i = 0; i < Math.max(first.length, second.length); i++) {
+      if (first[i]) order.push(first[i].id);
+      if (second[i]) order.push(second[i].id);
+    }
+    return order;
   }
 
   _chooseTwist() {
@@ -418,7 +494,7 @@ class Game {
     };
 
     // Lederen kaster først, så den som ligger bakerst får siste kast.
-    this.order = [...this.players.values()].sort((a, b) => b.total - a.total).map((p) => p.id);
+    this.order = this._turnOrder();
     for (const p of this.players.values()) {
       p.roundScore = 0;
       p.pucksLeft = this.settings.pucksPerPlayer;
@@ -501,11 +577,46 @@ class Game {
     return true;
   }
 
+  // Et prøvekast teller ikke og viser bare den siste pucken.
+  practice(playerId, input) {
+    if (this.phase !== 'lobby' || !input || !isNumber(input.power) || !isNumber(input.angle)) return false;
+    if (input.power < Physics.MIN_POWER) return false;
+    const player = this.players.get(playerId);
+    if (!player) return false;
+
+    const puck = this._newPuck(player, clamp(input.power, 0, 1), clamp(input.angle, -Physics.MAX_ANGLE, Physics.MAX_ANGLE));
+    this.world = this._emptyWorld();
+    const sim = Physics.cloneWorld(this.world);
+    sim.pucks.push({ ...puck });
+    const steps = Physics.runToRest(sim);
+
+    this.phase = 'practice';
+    this.emit('shot', { puck, shooterId: player.id, name: player.name, practice: true });
+    this.publish();
+    this._later(() => {
+      const landed = sim.pucks[0];
+      this.world = this._emptyWorld();
+      this.world.pucks = sim.pucks;
+      this.phase = 'lobby';
+      this.emit('shotResult', {
+        shooterId: player.id,
+        puckId: puck.id,
+        points: landed ? Physics.puckPoints(landed, sim) : 0,
+        x: landed ? landed.x : null,
+        y: landed ? landed.y : null,
+        banner: null,
+        practice: true,
+      });
+      this.publish();
+    }, steps * Physics.DT * 1000 + SETTLE_MARGIN_MS);
+    return true;
+  }
+
   _newPuck(player, power, angle) {
     return {
       id: ++this.puckSeq,
       owner: player.id,
-      color: player.color,
+      color: this.teamsActive ? TEAMS[player.team].color : player.color,
       x: 0,
       y: Physics.START_Y,
       ...Physics.shotVelocity(power, angle),
@@ -538,13 +649,16 @@ class Game {
     const puckScore = finalPuck ? Physics.puckPoints(finalPuck, sim) : 0;
 
     const knockedOwners = before.pucks.filter((p) => !remaining.has(p.id)).map((p) => p.owner);
-    const knockedOthers = knockedOwners.filter((owner) => owner !== shooter.id);
+    const knockedOthers = knockedOwners.filter((owner) => {
+      const victim = this.players.get(owner);
+      return !victim || this._isFoe(shooter, victim);
+    });
     const banked = puckScore > 0 && events.some((e) => (e.type === 'obstacle' || e.type === 'bumper') && e.id === puck.id);
 
     let opponentsLost = 0;
     for (const p of this.players.values()) {
       p.roundScore = scoresAfter[p.id] || 0;
-      if (p.id !== shooter.id) opponentsLost += Math.max(0, (scoresBefore[p.id] || 0) - p.roundScore);
+      if (this._isFoe(shooter, p)) opponentsLost += Math.max(0, (scoresBefore[p.id] || 0) - p.roundScore);
     }
 
     shooter.stats.knocks += knockedOthers.length;
@@ -614,43 +728,76 @@ class Game {
       .sort((a, b) => b.total - a.total || b.roundScore - a.roundScore)
       .map((p) => ({ id: p.id, name: p.name, color: p.color, roundScore: p.roundScore, total: p.total }));
 
+    const teams = this.teamsActive ? this._teamRows() : null;
+    const winners = isLast ? this._winners(teams || ranking.map((r) => ({ ...r, pucks: onBoard[r.id] || 0 }))) : null;
+    if (isLast) this._recordMatch(winners);
+
     this.summary = {
       round: this.round,
       ranking,
+      teams,
       bestShot: this.bestShot,
-      winners: isLast ? this._winners(ranking, onBoard) : null,
+      winners,
       awards: isLast ? this._awards() : null,
     };
     this.phase = isLast ? 'matchOver' : 'roundOver';
     this.publish();
   }
 
-  _winners(ranking, onBoard) {
-    const top = ranking.length ? ranking[0].total : 0;
+  _winners(contenders) {
+    const top = Math.max(0, ...contenders.map((c) => c.total));
     if (top > 0) {
-      return { names: ranking.filter((r) => r.total === top).map((r) => r.name), points: top, reason: 'points' };
+      return { names: contenders.filter((c) => c.total === top).map((c) => c.name), points: top, reason: 'points' };
     }
-    const most = Math.max(0, ...ranking.map((r) => onBoard[r.id] || 0));
+    const most = Math.max(0, ...contenders.map((c) => c.pucks));
     if (most > 0) {
-      return { names: ranking.filter((r) => (onBoard[r.id] || 0) === most).map((r) => r.name), pucks: most, reason: 'pucks' };
+      return { names: contenders.filter((c) => c.pucks === most).map((c) => c.name), pucks: most, reason: 'pucks' };
     }
     return { names: [], reason: 'none' };
   }
 
+  // Robotene holdes utenfor æresplassen.
+  _recordMatch(winners) {
+    for (const p of this.players.values()) {
+      if (p.isBot) continue;
+      let record = this.records.find((r) => r.name === p.name);
+      if (!record) {
+        record = { name: p.name, wins: 0, played: 0, best: 0 };
+        this.records.push(record);
+      }
+      record.played++;
+      record.best = Math.max(record.best, p.total);
+      if (winners.names.includes(this.teamsActive ? TEAMS[p.team].name : p.name)) record.wins++;
+    }
+    this.records.sort((a, b) => b.played - a.played);
+    this.records.length = Math.min(this.records.length, MAX_RECORDS);
+    this.onSave();
+  }
+
+  _topRecords() {
+    return [...this.records].sort((a, b) => b.wins - a.wins || b.best - a.best).slice(0, TOP_RECORDS);
+  }
+
+  resetRecords() {
+    this.records = [];
+    this.onSave();
+    this.publish();
+  }
+
   _awards() {
     const titles = [
-      { stat: 'bullseyes', emoji: '🎯', title: 'Snikskytteren', unit: 'perfekte kast' },
-      { stat: 'knocks', emoji: '💥', title: 'Bulldoseren', unit: 'pucker slått ut' },
+      { stat: 'bullseyes', emoji: '🎯', title: 'Snikskytteren', unit: 'perfekte kast', one: 'perfekt kast' },
+      { stat: 'knocks', emoji: '💥', title: 'Bulldoseren', unit: 'pucker slått ut', one: 'puck slått ut' },
       { stat: 'banks', emoji: '📐', title: 'Vinkelmesteren', unit: 'vinkelskudd' },
       { stat: 'bestValue', emoji: '⭐', title: 'Kveldens skudd', unit: 'i skuddverdi' },
-      { stat: 'falls', emoji: '🕳️', title: 'Over kanten', unit: 'pucker i gulvet' },
+      { stat: 'falls', emoji: '🕳️', title: 'Over kanten', unit: 'pucker i gulvet', one: 'puck i gulvet' },
     ];
     const players = [...this.players.values()];
-    return titles.flatMap(({ stat, emoji, title, unit }) => {
+    return titles.flatMap(({ stat, emoji, title, unit, one }) => {
       const best = Math.max(0, ...players.map((p) => p.stats[stat]));
       if (best === 0) return [];
       const names = players.filter((p) => p.stats[stat] === best).map((p) => p.name);
-      return [{ emoji, title, names, detail: `${best} ${unit}` }];
+      return [{ emoji, title, names, detail: `${best} ${best === 1 && one ? one : unit}` }];
     });
   }
 
@@ -666,14 +813,15 @@ class Game {
     let rating = 0;
     for (const p of this.players.values()) {
       const change = (after[p.id] || 0) - (before[p.id] || 0);
-      rating += p.id === player.id ? change : -change;
+      rating += this._isFoe(player, p) ? -change : change;
     }
     return rating;
   }
 
   _planBotShot(player) {
+    const { tries, shake } = BOT_LEVELS[this.settings.botLevel];
     let best = { power: 0.6, angle: 0, rating: -Infinity };
-    for (let i = 0; i < 48; i++) {
+    for (let i = 0; i < tries; i++) {
       const power = 0.3 + this.random() * 0.6;
       const angle = (this.random() - 0.5) * 0.5;
       const rating = this._rateBotShot(player, power, angle);
@@ -681,8 +829,8 @@ class Game {
     }
     // Litt skjelving, ellers er roboten umulig å slå.
     return {
-      power: clamp(best.power + (this.random() - 0.5) * 0.05, Physics.MIN_POWER, 1),
-      angle: clamp(best.angle + (this.random() - 0.5) * 0.05, -Physics.MAX_ANGLE, Physics.MAX_ANGLE),
+      power: clamp(best.power + (this.random() - 0.5) * shake, Physics.MIN_POWER, 1),
+      angle: clamp(best.angle + (this.random() - 0.5) * shake, -Physics.MAX_ANGLE, Physics.MAX_ANGLE),
     };
   }
 

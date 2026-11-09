@@ -8,7 +8,8 @@ const ctx = canvas.getContext('2d');
 const overlay = $('overlay');
 
 const ZONE_COLORS = { 4: 'rgba(230,110,30,.5)', 3: 'rgba(241,190,20,.48)', 2: 'rgba(46,190,110,.42)', 1: 'rgba(52,142,215,.42)' };
-const EDITABLE_PHASES = ['lobby', 'roundOver', 'matchOver'];
+const EDITABLE_PHASES = ['lobby', 'practice', 'roundOver', 'matchOver'];
+const PRACTICE_HOLD_MS = 3000;
 const TRAIL_LENGTH = 16;
 
 let state = null;
@@ -31,6 +32,7 @@ let clockEnd = 0;
 let clockTotal = 0;
 let lastFeedId = 0;
 let accumulator = 0;
+let practiceHoldUntil = 0;
 let lastFrame = performance.now();
 
 const trails = new Map();
@@ -55,6 +57,7 @@ function button(label, className, onClick) {
   return el('button', { className: `btn ${className}`, textContent: label, onclick: onClick });
 }
 
+const colorOf = (player) => player.teamColor || player.color;
 const nameList = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} og ${names[names.length - 1]}` : names[0] || '');
 
 // --- Lyd (syntetisk, ingen filer) ---
@@ -357,11 +360,16 @@ function activePlayer() {
   return state && state.turn ? state.players.find((p) => p.id === state.turn.playerId) : null;
 }
 
+function initialOf(playerId) {
+  const owner = state && state.players.find((p) => p.id === playerId);
+  return owner ? [...owner.name][0].toUpperCase() : null;
+}
+
 function drawAim(now) {
   const player = activePlayer();
   if (!player || replay || state.phase !== 'aiming') return;
   const pulse = 0.65 + Math.sin(now / 240) * 0.2;
-  drawPuck(0, P.START_Y, player.color, null, aim ? 1 : pulse);
+  drawPuck(0, P.START_Y, colorOf(player), initialOf(player.id), aim ? 1 : pulse);
   if (!aim || aim.power === null) return;
 
   const length = 70 + aim.power * 330;
@@ -370,7 +378,7 @@ function drawAim(now) {
   const tipX = dx * length;
   const tipY = P.START_Y + dy * length;
 
-  ctx.strokeStyle = player.color;
+  ctx.strokeStyle = colorOf(player);
   ctx.lineWidth = 7;
   ctx.lineCap = 'round';
   ctx.setLineDash([3, 18]);
@@ -382,7 +390,7 @@ function drawAim(now) {
   ctx.setLineDash([]);
   ctx.lineDashOffset = 0;
 
-  ctx.fillStyle = player.color;
+  ctx.fillStyle = colorOf(player);
   ctx.save();
   ctx.translate(tipX, tipY);
   ctx.rotate(aim.angle);
@@ -480,7 +488,7 @@ function draw(now, dt) {
   for (const p of view.pucks) {
     const still = p.vx === 0 && p.vy === 0;
     const points = still ? P.puckPoints(p, view) : 0;
-    drawPuck(p.x, p.y, p.color, points > 0 ? String(points) : null);
+    drawPuck(p.x, p.y, p.color, points > 0 ? String(points) : initialOf(p.owner));
   }
   drawEffects(dt);
 }
@@ -624,9 +632,17 @@ function renderScores() {
       const nameBox = el('div', { style: 'min-width:0' }, name, pucks ? el('div', { className: 'pucks', textContent: pucks }) : null);
 
       const active = state.turn && state.turn.playerId === p.id;
-      return el('li', { className: `row${active ? ' active' : ''}${p.connected ? '' : ' offline'}` }, dot(p.color), nameBox, pts, right);
+      return el('li', { className: `row${active ? ' active' : ''}${p.connected ? '' : ' offline'}` }, dot(colorOf(p)), nameBox, pts, right);
     })
   );
+  if (state.teams) {
+    list.prepend(...state.teams.map((t) => {
+      const pts = el('div', { className: 'pts' });
+      if (inRound && t.roundScore > 0) pts.append(el('small', { textContent: `+${t.roundScore}` }));
+      pts.append(el('b', { textContent: String(t.total) }));
+      return el('li', { className: 'row team' }, dot(t.color), el('div', { className: 'name', textContent: t.name }), pts);
+    }));
+  }
   $('roundLabel').textContent = state.round ? `Runde ${state.round} av ${state.settings.rounds}` : 'Spillere';
 }
 
@@ -634,7 +650,7 @@ function renderTurn() {
   const player = activePlayer();
   const label = $('turnLabel');
   const name = $('turnName');
-  name.style.color = player ? player.color : '';
+  name.style.color = player ? colorOf(player) : '';
   if (player) {
     label.textContent = 'Kaster nå';
     name.textContent = player.connected ? player.name : `${player.name} (borte)`;
@@ -643,6 +659,7 @@ function renderTurn() {
     name.textContent = {
       lobby: state.players.length ? 'Klare til å starte' : 'Venter på spillere',
       intro: `Runde ${state.round}`,
+      practice: 'Prøvekast',
       rolling: 'Pucken glir',
       aiming: 'Venter på spillere',
       roundOver: 'Runden er ferdig',
@@ -671,6 +688,13 @@ function renderFeed() {
   if (state.feed.length) lastFeedId = state.feed[state.feed.length - 1].id;
 }
 
+function renderRecords() {
+  $('recordsCard').hidden = state.records.length === 0;
+  $('records').replaceChildren(
+    ...state.records.map((r, i) => el('li', {}, el('span', { textContent: `${i + 1}. ${r.name}` }), el('span', { textContent: `🏆 ${r.wins}  ·  beste ${r.best}` })))
+  );
+}
+
 function setIfIdle(input, value) {
   if (document.activeElement !== input) input.value = value;
 }
@@ -682,6 +706,8 @@ function renderSetup() {
   setIfIdle($('clockSelect'), settings.shotClock);
   setIfIdle($('widthSlider'), config.widthRatio);
   $('twistCheck').checked = settings.twists;
+  $('teamCheck').checked = settings.teams;
+  setIfIdle($('botSelect'), settings.botLevel);
   $('puckVal').textContent = settings.pucksPerPlayer;
   $('roundVal').textContent = settings.rounds;
   $('widthVal').textContent = config.widthRatio;
@@ -718,7 +744,7 @@ function lobbySheet() {
     'div',
     { className: 'sheet' },
     el('h2', { textContent: 'Skann og bli med' }),
-    el('p', { className: 'lead', textContent: 'Mobilen din er kølla. Alle kan trykke start.' }),
+    el('p', { className: 'lead', textContent: 'Mobilen din er kølla. Prøv et kast mens dere venter.' }),
     qr,
     url,
     el('div', { className: 'chips' }, ...chips),
@@ -735,7 +761,7 @@ function rankingTable(ranking, showRound) {
         'tr',
         {},
         el('td', { textContent: `${i + 1}.` }),
-        el('td', {}, dot(r.color), r.name),
+        el('td', {}, dot(r.color), r.members ? `${r.name} (${r.members.join(', ')})` : r.name),
         showRound ? el('td', { className: 'num', textContent: `+${r.roundScore}` }) : null,
         el('td', { className: 'num' }, el('b', { textContent: String(r.total) }))
       )
@@ -761,7 +787,7 @@ function roundSheet() {
     { className: 'sheet' },
     el('h2', { textContent: `Runde ${summary.round} ferdig` }),
     el('p', { className: 'lead', textContent: `${settings.rounds - summary.round} igjen. Hammeren går til den som ligger bakerst.` }),
-    rankingTable(summary.ranking, true),
+    rankingTable(summary.teams || summary.ranking, true),
     isHost ? button('Neste runde', 'primary', () => hostAction('hostNext')) : el('p', { className: 'note', textContent: 'Trykk «Neste runde» på en mobil.' })
   );
 }
@@ -776,7 +802,7 @@ function matchSheet() {
     { className: 'sheet' },
     el('h2', { textContent: '🏆 Sluttresultat' }),
     el('p', { className: 'winner', textContent: winnerLine(summary.winners) }),
-    rankingTable(summary.ranking, false),
+    rankingTable(summary.teams || summary.ranking, false),
     awards.length ? el('div', { className: 'awards' }, ...awards) : null,
     isHost
       ? el('div', { className: 'actions' }, button('Spill igjen', 'primary', () => hostAction('hostRematch')), button('Til lobbyen', '', () => hostAction('resetToLobby')))
@@ -787,7 +813,7 @@ function matchSheet() {
 function renderOverlay() {
   const sheet = (() => {
     if (!state || editMode || replay) return null;
-    if (state.phase === 'lobby') return lobbySheet();
+    if (state.phase === 'lobby') return performance.now() < practiceHoldUntil ? null : lobbySheet();
     if (state.phase === 'roundOver') return roundSheet();
     if (state.phase === 'matchOver') return matchSheet();
     return null;
@@ -802,6 +828,7 @@ function renderAll() {
   renderScores();
   renderTwist();
   renderFeed();
+  renderRecords();
   renderSetup();
   renderOverlay();
 }
@@ -859,7 +886,7 @@ socket.on('state', (next) => {
   const phaseChanged = !previous || previous.phase !== state.phase;
   if (replay && phaseChanged) cancelReplay();
   if (phaseChanged && !EDITABLE_PHASES.includes(state.phase) && editMode) setEditMode(false);
-  if (rolling && state.phase !== 'rolling') rolling = false;
+  if (rolling && state.phase !== 'rolling' && state.phase !== 'practice') rolling = false;
 
   if (!rolling && !replay) syncView();
   if (phaseChanged) onPhaseChange(previous);
@@ -873,17 +900,22 @@ socket.on('state', (next) => {
   renderAll();
 });
 
-socket.on('shot', ({ puck }) => {
+socket.on('shot', ({ puck, practice }) => {
   rolling = true;
   aim = null;
   accumulator = 0;
+  if (practice) view.pucks = [];
   view.pucks.push({ ...puck });
   trails.set(puck.id, []);
   sound.shoot();
 });
 
-socket.on('shotResult', ({ points, x, y, banner }) => {
+socket.on('shotResult', ({ points, x, y, banner, practice }) => {
   rolling = false;
+  if (practice) {
+    practiceHoldUntil = performance.now() + PRACTICE_HOLD_MS;
+    setTimeout(renderOverlay, PRACTICE_HOLD_MS + 50);
+  }
   if (x !== null && points > 0) {
     floaters.push({ text: `+${points}`, x, y: y - 30, life: 1, color: '#ffe08a' });
     spawnSparks(x, y, '#ffd76a', 24, 420);
@@ -1006,6 +1038,11 @@ $('roundSlider').addEventListener('input', (e) => socket.emit('setSettings', { r
 $('clockSelect').addEventListener('change', (e) => socket.emit('setSettings', { shotClock: Number(e.target.value) }));
 $('twistCheck').addEventListener('change', (e) => socket.emit('setSettings', { twists: e.target.checked }));
 $('widthSlider').addEventListener('input', (e) => socket.emit('setConfig', { widthRatio: Number(e.target.value) }));
+$('teamCheck').addEventListener('change', (e) => socket.emit('setSettings', { teams: e.target.checked }));
+$('botSelect').addEventListener('change', (e) => socket.emit('setSettings', { botLevel: e.target.value }));
+$('recordsBtn').addEventListener('click', () => {
+  if (confirm('Slette hele æresplassen?')) socket.emit('resetRecords');
+});
 $('editBtn').addEventListener('click', () => setEditMode(!editMode));
 $('clearBtn').addEventListener('click', () => {
   view.obstacles = [];

@@ -23,12 +23,17 @@ let me = null;
 let state = null;
 let isMyTurn = false;
 let clockEnd = 0;
+let lastThrow = null;
+let lastPower = null;
 
 const pad = $('pad');
 const g = pad.getContext('2d');
 const drag = { active: false, startX: 0, startY: 0, x: 0, y: 0, power: 0, angle: 0, valid: false, lastSend: 0, lastBuzz: 0 };
 
 const vibrate = (pattern) => { if (navigator.vibrate) navigator.vibrate(pattern); };
+
+const inLobby = () => Boolean(state) && (state.phase === 'lobby' || state.phase === 'practice');
+const canThrow = () => isMyTurn || (inLobby() && me !== null);
 
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -67,7 +72,6 @@ socket.on('joined', (info) => {
   storage.set('shuffle_name', info.name);
   $('join').hidden = true;
   $('game').hidden = false;
-  $('myDot').style.background = info.color;
   $('myName').textContent = info.name;
   resizePad();
   render();
@@ -90,17 +94,28 @@ socket.on('state', (next) => {
   state = next;
   isMyTurn = Boolean(me && state.turn && state.turn.playerId === me.id && state.phase === 'aiming');
   if (isMyTurn && !wasMyTurn) vibrate([120, 60, 120]);
-  if (!isMyTurn) cancelDrag();
+  if (!canThrow()) cancelDrag();
   clockEnd = state.turn && state.turn.remainingMs !== null ? performance.now() + state.turn.remainingMs : 0;
   render();
+});
+
+socket.on('shotResult', ({ shooterId, points, x }) => {
+  if (!me || shooterId !== me.id || lastPower === null) return;
+  lastThrow = { power: lastPower, result: x === null ? 'av bordet' : points > 0 ? `${points} poeng` : 'utenfor sonene' };
+  if (points > 0) vibrate([30, 40, 30]);
 });
 
 // --- Skjerm ---
 
 const myPlayer = () => (state && me ? state.players.find((p) => p.id === me.id) : null);
 
+function myColor() {
+  const player = myPlayer();
+  return (player && player.teamColor) || me.color;
+}
+
 function statusFor(player) {
-  if (state.phase === 'lobby') return 'Venter på at spillet starter';
+  if (inLobby()) return 'Prøv et kast mens dere venter';
   if (state.phase === 'intro') return `Runde ${state.round}: ${state.twist.name}. ${state.twist.text}`;
   if (state.phase === 'rolling') return 'Pucken glir …';
   if (state.phase === 'roundOver') return `Runde ${state.round} er ferdig`;
@@ -135,34 +150,27 @@ function actionButton(label, event) {
 }
 
 function panelContent() {
-  if (state.phase === 'lobby') {
-    return [
-      el('h2', { textContent: 'Klar?' }),
-      playerList(state.players),
-      el('div', { className: 'spacer' }),
-      actionButton('Start spillet', 'start'),
-    ];
-  }
-
   const { summary } = state;
-  const place = summary.ranking.findIndex((r) => r.id === me.id) + 1;
+  const myTeam = myPlayer().teamName;
+  const rows = summary.teams || summary.ranking;
+  const place = (summary.teams ? rows.findIndex((r) => r.name === myTeam) : rows.findIndex((r) => r.id === me.id)) + 1;
 
   if (state.phase === 'roundOver') {
     return [
       el('h2', { textContent: `Runde ${summary.round}` }),
       el('div', { className: 'big', textContent: `${place}.` }),
-      playerList(summary.ranking, (r) => `+${r.roundScore} · ${r.total}`),
+      playerList(rows, (r) => `+${r.roundScore} · ${r.total}`),
       el('div', { className: 'spacer' }),
       actionButton('Neste runde', 'next'),
     ];
   }
 
-  const won = summary.winners.names.includes(me.name);
+  const won = summary.winners.names.includes(myTeam || me.name);
   const myAwards = (summary.awards || []).filter((a) => a.names.includes(me.name));
   return [
     el('h2', { textContent: won ? '🏆 Du vant!' : 'Sluttresultat' }),
     el('div', { className: 'big', textContent: `${place}.` }),
-    playerList(summary.ranking, (r) => String(r.total)),
+    playerList(rows, (r) => String(r.total)),
     ...myAwards.map((a) => el('div', { className: 'muted', textContent: `${a.emoji} ${a.title}: ${a.detail}` })),
     el('div', { className: 'spacer' }),
     actionButton('Spill igjen', 'rematch'),
@@ -177,6 +185,8 @@ function render() {
   if (!player) return;
 
   const inPlay = ['intro', 'aiming', 'rolling'].includes(state.phase);
+  const showPad = inPlay || inLobby();
+  $('myDot').style.background = myColor();
   const score = $('myScore');
   score.replaceChildren(
     ...(inPlay && player.roundScore > 0 ? [el('small', { textContent: `+${player.roundScore}` })] : []),
@@ -185,9 +195,10 @@ function render() {
   renderStatus();
 
   const panel = $('panel');
-  panel.hidden = inPlay;
-  pad.style.display = inPlay ? 'block' : 'none';
-  if (!inPlay) {
+  panel.hidden = showPad;
+  pad.style.display = showPad ? 'block' : 'none';
+  $('startBar').hidden = !inLobby();
+  if (!showPad) {
     const key = JSON.stringify([state.phase, state.players.map((p) => p.name), state.summary && state.summary.round]);
     if (key !== panelKey) {
       panelKey = key;
@@ -234,7 +245,7 @@ function cancelDrag() {
 }
 
 pad.addEventListener('pointerdown', (e) => {
-  if (!isMyTurn) return;
+  if (!canThrow()) return;
   const point = padPoint(e);
   drag.active = true;
   drag.startX = point.x;
@@ -255,7 +266,7 @@ pad.addEventListener('pointermove', (e) => {
   }
 
   const now = performance.now();
-  if (now - drag.lastSend > AIM_SEND_MS) {
+  if (isMyTurn && now - drag.lastSend > AIM_SEND_MS) {
     drag.lastSend = now;
     socket.volatile.emit('aim', drag.valid ? { power: drag.power, angle: drag.angle } : null);
   }
@@ -267,8 +278,13 @@ pad.addEventListener('pointerup', () => {
   drag.active = false;
   if (valid && isMyTurn) {
     vibrate(35);
+    lastPower = power;
     socket.emit('shoot', { power, angle });
-  } else {
+  } else if (valid && inLobby()) {
+    vibrate(35);
+    lastPower = power;
+    socket.emit('practice', { power, angle });
+  } else if (isMyTurn) {
     socket.emit('aim', null);
   }
 });
@@ -298,6 +314,10 @@ function drawPowerMeter(w, h) {
   g.fillRect(x, top + height * (1 - high), 10, height * (high - low));
   g.fillStyle = drag.power > SCORING_BAND[1] ? '#e5574f' : '#e2b35c';
   g.fillRect(x, top + height * (1 - drag.power), 10, height * drag.power);
+  if (lastThrow) {
+    g.fillStyle = '#fff';
+    g.fillRect(x - 6, top + height * (1 - lastThrow.power) - 1.5, 22, 3);
+  }
 }
 
 function drawPad(now) {
@@ -306,9 +326,9 @@ function drawPad(now) {
   const w = pad.clientWidth;
   const h = pad.clientHeight;
   g.clearRect(0, 0, w, h);
-  const color = me.color;
+  const color = myColor();
 
-  if (!isMyTurn) {
+  if (!canThrow()) {
     drawPuck(w / 2, h * 0.3, 34, color, 0.25);
     return;
   }
@@ -327,7 +347,11 @@ function drawPad(now) {
     g.fillStyle = '#b3a491';
     g.font = '600 15px system-ui, sans-serif';
     g.textAlign = 'center';
-    g.fillText('Sett fingeren høyt oppe, dra ned og slipp', w / 2, h - 18);
+    g.fillText('Sett fingeren høyt oppe, dra ned og slipp', w / 2, h - (inLobby() ? 84 : 18));
+    if (lastThrow) {
+      g.fillStyle = '#f6ecdf';
+      g.fillText(`Forrige kast: ${Math.round(lastThrow.power * 100)} % gav ${lastThrow.result}`, w / 2, 28);
+    }
     return;
   }
 
@@ -368,6 +392,8 @@ function drawPad(now) {
 }
 
 requestAnimationFrame(drawPad);
+
+$('startBtn').addEventListener('click', () => { vibrate(20); socket.emit('start'); });
 
 $('reactions').append(
   ...REACTIONS.map((emoji) => el('button', { textContent: emoji, onclick: () => { vibrate(10); socket.emit('react', emoji); } }))
