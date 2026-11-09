@@ -3,630 +3,212 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hybrid Shuffleboard - Hovedskjerm</title>
+  <title>Shufflebord</title>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="/physics.js"></script>
   <style>
+    :root {
+      --bg: #14100c; --panel: #211a13; --panel-2: #2d241a; --line: #43362a;
+      --text: #f6ecdf; --muted: #b3a491; --brass: #e2b35c; --good: #4fd08f; --bad: #e5574f;
+      --display: Georgia, 'Times New Roman', serif;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background-color: #121212; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; display: flex; height: 100vh; }
-    #sidebar { width: 340px; background: #1e1e1e; padding: 16px; display: flex; flex-direction: column; gap: 12px; border-right: 2px solid #333; z-index: 10; overflow-y: auto; }
-    #board-container { flex: 1; display: flex; justify-content: center; align-items: center; background: #0a0a0c; padding: 20px; position: relative; }
-    canvas { background: #d4a373; border: 8px solid #5c3a21; border-radius: 8px; box-shadow: 0 0 30px rgba(0,0,0,0.9); cursor: crosshair; }
-    .qr-box { background: #fff; padding: 8px; border-radius: 8px; display: flex; justify-content: center; align-items: center; min-height: 136px; }
-    
-    .player-list { list-style: none; margin-top: 6px; }
-    .player-item { padding: 8px 10px; background: #2a2a2a; margin-bottom: 6px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; font-weight: 500; }
-    .player-info { display: flex; align-items: center; gap: 8px; }
-    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-    .online { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; } 
-    .offline { background: #e74c3c; }
-    
-    .kick-btn { background: #e74c3c; color: #fff; border: none; border-radius: 4px; padding: 4px 8px; font-size: 0.75rem; font-weight: bold; cursor: pointer; }
-    .kick-btn:hover { background: #c0392b; }
+    html, body { height: 100%; }
+    body { background: radial-gradient(1200px 800px at 50% 40%, #2a2017, var(--bg)); color: var(--text); font-family: system-ui, 'Segoe UI', sans-serif; overflow: hidden; }
+    button { font: inherit; color: inherit; cursor: pointer; border: none; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    [hidden] { display: none !important; }
 
-    .btn { padding: 10px; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; width: 100%; }
-    .btn-green { background: #2ecc71; color: #111; }
-    .btn-green:hover { background: #27ae60; }
-    .btn-orange { background: #e67e22; }
-    .btn-orange:hover { background: #d35400; }
-    .btn-red { background: #e74c3c; }
-    .btn-red:hover { background: #c0392b; }
-    .btn-blue { background: #3498db; }
-    .btn-blue:hover { background: #2980b9; }
+    #app { display: grid; grid-template-columns: 320px minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr); height: 100vh; }
+    aside { background: var(--panel); padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    #left { border-right: 1px solid var(--line); }
+    #right { border-left: 1px solid var(--line); }
+    #stage { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+    #table { position: relative; line-height: 0; border-radius: 6px; box-shadow: 0 0 0 10px #4a2e19, 0 0 0 12px #2b1a0e, 0 24px 70px #000c; }
+    canvas#board { display: block; border-radius: 3px; touch-action: none; }
 
-    .turn-box { background: #2a2a2a; padding: 12px; border-radius: 6px; text-align: center; border-left: 4px solid #3498db; }
-    .mode-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
-    .mode-edit { background: #f39c12; color: #000; }
-    .mode-play { background: #2ecc71; color: #000; }
+    .brand { font-family: var(--display); font-size: 1.9rem; letter-spacing: .5px; color: var(--brass); font-weight: 700; }
+    .card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+    .eyebrow { font-size: .7rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); }
 
-    #winnerOverlay {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(20, 20, 25, 0.95);
-      border: 3px solid #f39c12;
-      border-radius: 12px;
-      padding: 30px;
-      text-align: center;
-      box-shadow: 0 0 40px rgba(0,0,0,0.8);
-      display: none;
-      z-index: 100;
-      min-width: 320px;
+    #turnName { font-size: 1.5rem; font-weight: 700; margin-top: 2px; overflow-wrap: anywhere; }
+    .clock { height: 5px; border-radius: 3px; background: #0005; margin-top: 8px; overflow: hidden; }
+    .clock i { display: block; height: 100%; width: 0; background: var(--brass); }
+
+    #scoreList { list-style: none; display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+    .row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; background: #0003; border: 1px solid transparent; }
+    .row.active { border-color: var(--brass); background: #e2b35c22; }
+    .row.offline { opacity: .45; }
+    .dot { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 2px #fff9; }
+    .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pucks { color: var(--muted); font-size: .72rem; letter-spacing: 1px; }
+    .pts { font-variant-numeric: tabular-nums; text-align: right; }
+    .pts b { font-size: 1.15rem; }
+    .pts small { color: var(--good); margin-right: 5px; }
+    .kick { background: var(--bad); border-radius: 4px; font-size: .68rem; font-weight: 700; padding: 2px 6px; margin-left: 6px; }
+
+    #joinCard { display: flex; gap: 10px; align-items: center; }
+    .qr { background: #fff; border-radius: 6px; padding: 4px; line-height: 0; }
+    .qr svg { display: block; width: 100%; height: 100%; }
+    #joinCard .qr { width: 88px; height: 88px; flex: none; }
+    .url { font-size: .78rem; color: var(--muted); overflow-wrap: anywhere; }
+
+    .tools { display: flex; gap: 6px; }
+    .btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font-weight: 600; width: 100%; }
+    .btn:hover:not(:disabled) { background: #3a2f23; }
+    .btn.primary { background: var(--brass); color: #231708; border-color: transparent; font-weight: 800; }
+    .btn.primary:hover:not(:disabled) { background: #f0c673; }
+    .btn.danger { color: #ff9a94; }
+    .btn.on { background: #f39c12; color: #111; }
+    .tools .btn.icon { width: 46px; flex: none; }
+
+    #setup { display: flex; flex-direction: column; gap: 10px; }
+    #setup label { display: flex; flex-direction: column; gap: 3px; font-size: .84rem; }
+    #setup label.inline { flex-direction: row; align-items: center; gap: 8px; }
+    #setup input[type=range], #setup select { width: 100%; accent-color: var(--brass); }
+    #setup select { background: #0004; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+    .note { font-size: .76rem; color: var(--muted); }
+    .warn { font-size: .78rem; color: #ffc27a; }
+    #pinForm { display: flex; gap: 6px; }
+    #pinInput { width: 100%; padding: 8px; background: #0004; color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+
+    #twistName { font-family: var(--display); font-size: 1.5rem; color: var(--brass); margin-top: 2px; }
+    #twistText { color: var(--muted); font-size: .92rem; margin-top: 4px; }
+    #feedCard { flex: 1; min-height: 0; overflow: hidden; }
+    #feed { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
+    #feed li { font-size: .93rem; color: var(--muted); }
+    #feed li.big { color: var(--text); font-weight: 700; }
+    #feed li.round { color: var(--brass); font-weight: 700; }
+    #feed li.fresh { animation: slideIn .35s ease-out; }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(14px); } }
+
+    #banner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; line-height: 1.1; padding: 12px; }
+    #banner div { animation: pop 2.2s ease both; text-shadow: 0 3px 18px #000, 0 1px 2px #000; }
+    #banner .big { font-family: var(--display); font-size: clamp(2.2rem, 5vw, 4rem); font-weight: 800; color: #fff; }
+    #banner .sub { margin-top: 10px; font-size: 1.15rem; color: #ffe7b8; font-weight: 600; line-height: 1.25; }
+    @keyframes pop { 0% { opacity: 0; transform: scale(.7); } 12% { opacity: 1; transform: scale(1.06); } 20% { transform: scale(1); } 82% { opacity: 1; } 100% { opacity: 0; } }
+
+    #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: #0007; animation: fade .3s; }
+    @keyframes fade { from { opacity: 0; } }
+    .sheet { background: var(--panel); border: 1px solid var(--brass); border-radius: 14px; padding: 24px; width: min(520px, 100%); max-height: 100%; overflow-y: auto; text-align: center; box-shadow: 0 20px 70px #000c; }
+    .sheet h2 { font-family: var(--display); font-size: 2.1rem; color: var(--brass); }
+    .sheet .lead { color: var(--muted); margin: 6px 0 14px; }
+    .sheet .winner { font-size: 1.3rem; margin: 8px 0 16px; font-weight: 700; }
+    .sheet .qr { width: 220px; height: 220px; margin: 0 auto 8px; }
+    .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 14px 0; min-height: 30px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--panel-2); border-radius: 99px; font-weight: 600; }
+    .chip .dot { width: 11px; height: 11px; }
+    .ranking { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    .ranking td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+    .ranking td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .ranking .dot { display: inline-block; vertical-align: -2px; margin-right: 7px; }
+    .awards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-bottom: 16px; text-align: left; }
+    .award { background: var(--panel-2); border-radius: 9px; padding: 9px 11px; }
+    .award b { display: block; color: var(--brass); }
+    .award span { font-size: .84rem; color: var(--muted); }
+    .actions { display: flex; gap: 8px; }
+
+    #reactions { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+    .reaction { position: absolute; bottom: -80px; text-align: center; animation: rise 3s ease-out forwards; }
+    .reaction .e { font-size: 3.4rem; line-height: 1; }
+    .reaction .n { font-size: .85rem; font-weight: 700; text-shadow: 0 1px 4px #000; }
+    @keyframes rise { 0% { transform: translateY(0); opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(-75vh) rotate(8deg); opacity: 0; } }
+    #confetti { position: fixed; inset: 0; pointer-events: none; }
+
+    @media (max-width: 1180px) {
+      #app { grid-template-columns: 300px minmax(0, 1fr); }
+      #right { display: none; }
     }
   </style>
 </head>
 <body>
+  <div id="app">
+    <aside id="left">
+      <div class="brand">Shufflebord</div>
 
-  <div id="sidebar">
-    <h2>Shuffleboard</h2>
-    
-    <div class="turn-box">
-      <small style="color:#aaa; font-size: 0.8em; text-transform: uppercase; letter-spacing: 1px;">Neste kast:</small>
-      <h3 id="turnName" style="color:#3498db; margin-top: 4px;">Venter på spillere...</h3>
-    </div>
+      <section class="card">
+        <div class="eyebrow" id="turnLabel">Neste kast</div>
+        <div id="turnName">Venter på spillere</div>
+        <div class="clock"><i id="clockBar"></i></div>
+      </section>
 
-    <div class="qr-box"><div id="qrcode"></div></div>
+      <section class="card">
+        <div class="eyebrow" id="roundLabel">Stilling</div>
+        <ol id="scoreList"></ol>
+      </section>
 
-    <div style="display:flex; flex-direction:column; gap:8px;">
-      <div style="text-align:center;">
-        <span id="modeBadge" class="mode-badge mode-edit">Kalibreringsmodus</span>
+      <section class="card" id="joinCard">
+        <div class="qr" data-qr></div>
+        <div>
+          <div class="eyebrow">Bli med</div>
+          <div class="url" data-url></div>
+        </div>
+      </section>
+
+      <div class="tools">
+        <button class="btn" id="setupToggle">⚙ Oppsett</button>
+        <button class="btn icon" id="muteBtn" title="Lyd av/på">🔊</button>
+        <button class="btn icon" id="fullBtn" title="Fullskjerm">⛶</button>
       </div>
 
-      <button id="saveObstaclesBtn" class="btn btn-green">Lagre hindringer</button>
-      <button id="editObstaclesBtn" class="btn btn-orange" style="display:none;">Endre hindringer</button>
-      <button id="clearBtn" class="btn btn-red">Fjern alle hindringer</button>
-      
-      <hr style="border: 0.5px solid #333; margin: 4px 0;">
+      <section class="card" id="setup" hidden>
+        <form id="pinForm" hidden>
+          <input id="pinInput" inputmode="numeric" placeholder="Verts-PIN" autocomplete="off">
+          <button class="btn primary" style="width:auto">OK</button>
+        </form>
+        <div class="note" id="pinNote" hidden>PIN-koden står i serverens konsoll. Uten den er dette bare en visningsskjerm.</div>
 
-      <label style="font-size: 0.85em;">Pucker per spiller: <span id="puckCountVal">4</span></label>
-      <input type="range" id="puckSlider" min="1" max="10" value="4">
+        <div id="hostControls" hidden style="display:flex;flex-direction:column;gap:10px">
+          <label><span>Pucker per spiller: <b id="puckVal"></b></span><input type="range" id="puckSlider" min="1" max="10"></label>
+          <label><span>Runder per kamp: <b id="roundVal"></b></span><input type="range" id="roundSlider" min="1" max="9"></label>
+          <label>Skuddklokke
+            <select id="clockSelect">
+              <option value="0">Av</option><option value="20">20 sekunder</option>
+              <option value="30">30 sekunder</option><option value="45">45 sekunder</option><option value="60">60 sekunder</option>
+            </select>
+          </label>
+          <label class="inline"><input type="checkbox" id="twistCheck"> Rundens vri fra runde 2</label>
+          <div class="note">Puck- og vriendringer gjelder fra neste runde.</div>
 
-      <label style="font-size: 0.85em;">Bordbredde (%): <span id="wVal">100</span></label>
-      <input type="range" id="wSlider" min="50" max="100" value="100">
+          <hr style="border:0;border-top:1px solid var(--line)">
+          <label><span>Bordbredde: <b id="widthVal"></b> %</span><input type="range" id="widthSlider" min="50" max="100"></label>
+          <button class="btn" id="editBtn">Rediger hindringer</button>
+          <button class="btn danger" id="clearBtn">Fjern alle hindringer</button>
+          <div class="note" id="editHelp" hidden>Klikk for ny, dra for å flytte, scroll for størrelse, dobbeltklikk for å slette. Lagres automatisk.</div>
+          <div class="warn" id="calibrationWarn" hidden>Skjermstørrelsen er endret siden hindringene ble plassert. Kontroller at de ligger under glassene.</div>
 
-      <button id="resetBtn" class="btn btn-blue" style="margin-top:4px;">Ny Runde / Tøm Banen</button>
-    </div>
+          <hr style="border:0;border-top:1px solid var(--line)">
+          <button class="btn" id="botBtn">🤖 Legg til robot</button>
+          <button class="btn" id="lobbyBtn">Avbryt og gå til lobbyen</button>
+          <button class="btn danger" id="kickAllBtn">Kast ut alle</button>
+        </div>
+      </section>
+    </aside>
 
-    <div>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 4px;">
-        <h3 style="font-size: 1.1em;">Spillere</h3>
-        <button id="kickAllBtn" style="background:none; border:none; color:#e74c3c; font-size:0.75rem; cursor:pointer; text-decoration:underline;">Kast ut alle</button>
+    <main id="stage">
+      <div id="table">
+        <canvas id="board"></canvas>
+        <div id="banner"></div>
       </div>
-      <ul id="players" class="player-list"></ul>
-    </div>
+      <div id="overlay" hidden></div>
+    </main>
+
+    <aside id="right">
+      <section class="card">
+        <div class="eyebrow">Rundens vri</div>
+        <div id="twistName">Ikke startet</div>
+        <div id="twistText">Skann koden og samle gjengen.</div>
+      </section>
+      <section class="card" id="feedCard">
+        <div class="eyebrow">Kommentatoren</div>
+        <ol id="feed"></ol>
+      </section>
+    </aside>
   </div>
 
-  <div id="board-container">
-    <canvas id="boardCanvas"></canvas>
+  <div id="reactions"></div>
+  <canvas id="confetti"></canvas>
 
-    <div id="winnerOverlay">
-      <h2 style="color: #f1c40f; font-size: 2rem; margin-bottom: 10px;">🏆 RESULTAT 🏆</h2>
-      <div id="winnerText" style="font-size: 1.2rem; margin-bottom: 20px;"></div>
-      <button id="restartGameBtn" class="btn btn-green">Start Ny Runde</button>
-    </div>
-  </div>
-
-  <script>
-    const socket = io();
-    const canvas = document.getElementById('boardCanvas');
-    const ctx = canvas.getContext('2d');
-    const wSlider = document.getElementById('wSlider');
-    const puckSlider = document.getElementById('puckSlider');
-    const saveBtn = document.getElementById('saveObstaclesBtn');
-    const editBtn = document.getElementById('editObstaclesBtn');
-    const clearBtn = document.getElementById('clearBtn');
-    const resetBtn = document.getElementById('resetBtn');
-    const restartGameBtn = document.getElementById('restartGameBtn');
-    const kickAllBtn = document.getElementById('kickAllBtn');
-    const modeBadge = document.getElementById('modeBadge');
-    const winnerOverlay = document.getElementById('winnerOverlay');
-    const winnerText = document.getElementById('winnerText');
-
-    let boardConfig = { widthRatio: 100, obstacles: [] };
-    let pucks = [];
-    let playerListGlobal = [];
-    const PUCK_RADIUS = 18;
-
-    let isEditMode = true;
-    let draggedObstacle = null;
-    let hoveredObstacle = null;
-    let gameEndedSignalReceived = false;
-    let winnerCalculated = false;
-
-    // --- LYDMOTOR (WEB AUDIO API) ---
-    let audioCtx = null;
-
-    function initAudio() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-    }
-
-    function playGlassSound() {
-      initAudio();
-      if (!audioCtx) return;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(1760, audioCtx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.35);
-    }
-
-    function playBallClickSound() {
-      initAudio();
-      if (!audioCtx) return;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(400, audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.05);
-      gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.05);
-    }
-
-    window.addEventListener('click', initAudio, { once: true });
-
-    function resizeCanvas() {
-      const container = document.getElementById('board-container');
-      if (!container) return;
-      canvas.height = Math.max(300, container.clientHeight * 0.92);
-      canvas.width = Math.max(200, (canvas.height * 0.45) * (boardConfig.widthRatio / 100));
-    }
-
-    window.addEventListener('resize', resizeCanvas);
-
-    try {
-      if (window.QRCode) {
-        new QRCode(document.getElementById("qrcode"), { 
-          text: `${window.location.origin}/mobile.html`, 
-          width: 120, 
-          height: 120 
-        });
-      }
-    } catch(e) { console.error("QR error:", e); }
-
-    socket.emit('registerBoard');
-
-    wSlider.addEventListener('input', (e) => {
-      document.getElementById('wVal').textContent = e.target.value;
-      socket.emit('updateBoardConfig', { widthRatio: e.target.value });
-    });
-
-    puckSlider.addEventListener('input', (e) => {
-      document.getElementById('puckCountVal').textContent = e.target.value;
-      socket.emit('setPucksPerPlayer', e.target.value);
-    });
-
-    kickAllBtn.addEventListener('click', () => {
-      if (confirm("Vil du kaste ut ALLE spillere fra rommet?")) {
-        socket.emit('kickAllPlayers');
-      }
-    });
-
-    function getCanvasCoords(e) {
-      const rect = canvas.getBoundingClientRect();
-      const xPx = e.clientX - rect.left;
-      const yPx = e.clientY - rect.top;
-      return {
-        xPx,
-        yPx,
-        xPercent: (xPx / canvas.width) * 100,
-        yPercent: (yPx / canvas.height) * 100
-      };
-    }
-
-    function findObstacleAt(xPx, yPx) {
-      return boardConfig.obstacles.find(obs => {
-        const ox = (obs.x / 100) * canvas.width;
-        const oy = (obs.y / 100) * canvas.height;
-        const dist = Math.hypot(xPx - ox, yPx - oy);
-        return dist <= obs.radius + 10;
-      });
-    }
-
-    canvas.addEventListener('mousedown', (e) => {
-      initAudio();
-      if (!isEditMode) return;
-      const coords = getCanvasCoords(e);
-      const hit = findObstacleAt(coords.xPx, coords.yPx);
-
-      if (hit) {
-        draggedObstacle = hit;
-      } else {
-        const newObs = { x: coords.xPercent, y: coords.yPercent, radius: 40 };
-        boardConfig.obstacles.push(newObs);
-        draggedObstacle = newObs;
-      }
-    });
-
-    canvas.addEventListener('mousemove', (e) => {
-      const coords = getCanvasCoords(e);
-      hoveredObstacle = findObstacleAt(coords.xPx, coords.yPx);
-
-      if (isEditMode && draggedObstacle) {
-        draggedObstacle.x = Math.max(0, Math.min(100, coords.xPercent));
-        draggedObstacle.y = Math.max(0, Math.min(100, coords.yPercent));
-      }
-
-      canvas.style.cursor = isEditMode ? (hoveredObstacle ? 'move' : 'crosshair') : 'default';
-    });
-
-    window.addEventListener('mouseup', () => { draggedObstacle = null; });
-
-    canvas.addEventListener('wheel', (e) => {
-      if (!isEditMode) return;
-      const coords = getCanvasCoords(e);
-      const target = findObstacleAt(coords.xPx, coords.yPx) || hoveredObstacle;
-      if (target) {
-        e.preventDefault();
-        const delta = e.deltaY < 0 ? 3 : -3;
-        target.radius = Math.max(15, Math.min(150, target.radius + delta));
-      }
-    }, { passive: false });
-
-    canvas.addEventListener('dblclick', (e) => {
-      if (!isEditMode) return;
-      const coords = getCanvasCoords(e);
-      const hit = findObstacleAt(coords.xPx, coords.yPx);
-      if (hit) {
-        boardConfig.obstacles = boardConfig.obstacles.filter(o => o !== hit);
-      }
-    });
-
-    saveBtn.addEventListener('click', () => {
-      initAudio();
-      isEditMode = false;
-      modeBadge.textContent = "Spillmodus (Låst)";
-      modeBadge.className = "mode-badge mode-play";
-      saveBtn.style.display = "none";
-      editBtn.style.display = "block";
-      socket.emit('updateBoardConfig', { obstacles: boardConfig.obstacles });
-    });
-
-    editBtn.addEventListener('click', () => {
-      initAudio();
-      isEditMode = true;
-      modeBadge.textContent = "Kalibreringsmodus";
-      modeBadge.className = "mode-badge mode-edit";
-      saveBtn.style.display = "block";
-      editBtn.style.display = "none";
-    });
-
-    clearBtn.addEventListener('click', () => {
-      boardConfig.obstacles = [];
-      socket.emit('clearObstacles');
-    });
-
-    resetBtn.addEventListener('click', () => socket.emit('resetGame'));
-    restartGameBtn.addEventListener('click', () => {
-      winnerOverlay.style.display = 'none';
-      socket.emit('resetGame');
-    });
-
-    socket.on('boardConfigUpdate', (cfg) => {
-      boardConfig = cfg;
-      wSlider.value = cfg.widthRatio;
-      document.getElementById('wVal').textContent = cfg.widthRatio;
-      resizeCanvas();
-    });
-
-    socket.on('puckShot', (puck) => {
-      puck.px = (puck.x / 100) * canvas.width;
-      puck.py = (puck.y / 100) * canvas.height;
-      puck.vxPx = (puck.vx / 100) * canvas.width;
-      puck.vyPx = (puck.vy / 100) * canvas.height;
-      puck.lastGlassHit = 0;
-      puck.lastPuckHit = 0;
-      pucks.push(puck);
-    });
-
-    socket.on('resetGame', () => {
-      pucks = [];
-      winnerOverlay.style.display = 'none';
-      gameEndedSignalReceived = false;
-      winnerCalculated = false;
-    });
-
-    socket.on('gameStateUpdate', (gs) => {
-      pucks = gs.pucks || [];
-      pucks.forEach(p => {
-        if (p.px === undefined) {
-          p.px = (p.x / 100) * canvas.width;
-          p.py = (p.y / 100) * canvas.height;
-          p.vxPx = ((p.vx || 0) / 100) * canvas.width;
-          p.vyPx = ((p.vy || 0) / 100) * canvas.height;
-        }
-      });
-      if (!gs.gameEnded) {
-        winnerOverlay.style.display = 'none';
-        gameEndedSignalReceived = false;
-        winnerCalculated = false;
-      }
-    });
-
-    socket.on('turnUpdate', ({ name, pucksLeft }) => {
-      if (name === 'Ingen spillere' || !name) {
-        document.getElementById('turnName').textContent = 'Ingen spillere tilkoblet';
-      } else {
-        document.getElementById('turnName').textContent = `${name} (${pucksLeft} igjen)`;
-      }
-    });
-
-    socket.on('playerListUpdate', (players) => {
-      playerListGlobal = players;
-      const list = document.getElementById('players');
-      list.innerHTML = '';
-      players.forEach(p => {
-        const li = document.createElement('li');
-        li.className = 'player-item';
-        li.innerHTML = `
-          <div class="player-info">
-            <span class="status-dot ${p.connected ? 'online' : 'offline'}"></span>
-            <span><span style="color:${p.color}">●</span> ${p.name}</span>
-          </div>
-          <button class="kick-btn" onclick="kickPlayer('${p.uuid}')">Fjern</button>
-        `;
-        list.appendChild(li);
-      });
-    });
-
-    window.kickPlayer = function(uuid) {
-      socket.emit('kickPlayer', uuid);
-    };
-
-    socket.on('gameEnded', () => {
-      gameEndedSignalReceived = true;
-    });
-
-    function calculateFinalScores() {
-      const zoneH = canvas.height * 0.08;
-      const playerScores = {};
-      const playerPuckCounts = {};
-
-      playerListGlobal.forEach(p => {
-        playerScores[p.uuid] = 0;
-        playerPuckCounts[p.uuid] = 0;
-      });
-
-      pucks.forEach(p => {
-        if (playerScores[p.playerUuid] === undefined) return;
-
-        playerPuckCounts[p.playerUuid] = (playerPuckCounts[p.playerUuid] || 0) + 1;
-
-        if (p.py >= 0 && p.py < zoneH) {
-          playerScores[p.playerUuid] += 4;
-        } else if (p.py >= zoneH && p.py < zoneH * 2) {
-          playerScores[p.playerUuid] += 3;
-        } else if (p.py >= zoneH * 2 && p.py < zoneH * 3) {
-          playerScores[p.playerUuid] += 2;
-        } else if (p.py >= zoneH * 3 && p.py < zoneH * 4) {
-          playerScores[p.playerUuid] += 1;
-        }
-      });
-
-      let maxScore = -1;
-      let scoreWinners = [];
-
-      Object.keys(playerScores).forEach(uuid => {
-        const score = playerScores[uuid];
-        if (score > maxScore) {
-          maxScore = score;
-          scoreWinners = [uuid];
-        } else if (score === maxScore && maxScore > 0) {
-          scoreWinners.push(uuid);
-        }
-      });
-
-      let winnerHtml = "";
-
-      if (maxScore > 0) {
-        if (scoreWinners.length === 1) {
-          const winner = playerListGlobal.find(p => p.uuid === scoreWinners[0]);
-          winnerHtml = `<p>Vinneren er <b style="color:${winner ? winner.color : '#fff'}">${winner ? winner.name : 'Ukjent'}</b> med <b>${maxScore} poeng</b>!</p>`;
-        } else {
-          const winnerNames = scoreWinners.map(id => playerListGlobal.find(p => p.uuid === id)?.name).join(' & ');
-          winnerHtml = `<p>Uavgjort! Delt seier mellom <b>${winnerNames}</b> med <b>${maxScore} poeng</b>!</p>`;
-        }
-      } else {
-        let maxPucks = -1;
-        let puckWinners = [];
-
-        Object.keys(playerPuckCounts).forEach(uuid => {
-          const count = playerPuckCounts[uuid];
-          if (count > maxPucks) {
-            maxPucks = count;
-            puckWinners = [uuid];
-          } else if (count === maxPucks && maxPucks > 0) {
-            puckWinners.push(uuid);
-          }
-        });
-
-        if (maxPucks > 0) {
-          if (puckWinners.length === 1) {
-            const winner = playerListGlobal.find(p => p.uuid === puckWinners[0]);
-            winnerHtml = `<p>Ingen traff poengsonene! Vinneren er <b style="color:${winner ? winner.color : '#fff'}">${winner ? winner.name : 'Ukjent'}</b> med flest pucker på bordet (<b>${maxPucks} pucker</b>)!</p>`;
-          } else {
-            const winnerNames = puckWinners.map(id => playerListGlobal.find(p => p.uuid === id)?.name).join(' & ');
-            winnerHtml = `<p>Ingen traff poengsonene! Delt seier mellom <b>${winnerNames}</b> med <b>${maxPucks} pucker</b> på bordet!</p>`;
-          }
-        } else {
-          winnerHtml = `<p>Ingen pucker igjen på bordet! Ingen vinner denne runden.</p>`;
-        }
-      }
-
-      winnerText.innerHTML = winnerHtml;
-      winnerOverlay.style.display = 'block';
-    }
-
-    function updatePhysics() {
-      const friction = 0.988;
-      const now = Date.now();
-      let isAnyPuckMoving = false;
-
-      pucks.forEach(p => {
-        if (Math.abs(p.vxPx) < 0.05 && Math.abs(p.vyPx) < 0.05) {
-          p.vxPx = 0; 
-          p.vyPx = 0;
-        } else {
-          p.px += p.vxPx;
-          p.py += p.vyPx;
-          p.vxPx *= friction;
-          p.vyPx *= friction;
-          isAnyPuckMoving = true;
-        }
-
-        boardConfig.obstacles.forEach(obs => {
-          const obsX = (obs.x / 100) * canvas.width;
-          const obsY = (obs.y / 100) * canvas.height;
-          const dx = p.px - obsX;
-          const dy = p.py - obsY;
-          const dist = Math.hypot(dx, dy);
-
-          if (dist < PUCK_RADIUS + obs.radius) {
-            const angle = Math.atan2(dy, dx);
-            const speed = Math.hypot(p.vxPx, p.vyPx);
-            p.vxPx = Math.cos(angle) * speed * 0.7;
-            p.vyPx = Math.sin(angle) * speed * 0.7;
-
-            if (!p.lastGlassHit || now - p.lastGlassHit > 120) {
-              playGlassSound();
-              p.lastGlassHit = now;
-            }
-          }
-        });
-      });
-
-      for (let i = 0; i < pucks.length; i++) {
-        for (let j = i + 1; j < pucks.length; j++) {
-          const p1 = pucks[i];
-          const p2 = pucks[j];
-
-          const dx = p2.px - p1.px;
-          const dy = p2.py - p1.py;
-          const dist = Math.hypot(dx, dy);
-          const minDist = PUCK_RADIUS * 2;
-
-          if (dist < minDist && dist > 0) {
-            const overlap = (minDist - dist) / 2;
-            const nx = dx / dist;
-            const ny = dy / dist;
-
-            p1.px -= nx * overlap;
-            p1.py -= ny * overlap;
-            p2.px += nx * overlap;
-            p2.py += ny * overlap;
-
-            const kx = p1.vxPx - p2.vxPx;
-            const ky = p1.vyPx - p2.vyPx;
-            const p = 2 * (nx * kx + ny * ky) / 2;
-
-            p1.vxPx -= p * nx * 0.9;
-            p1.vyPx -= p * ny * 0.9;
-            p2.vxPx += p * nx * 0.9;
-            p2.vyPx += p * ny * 0.9;
-
-            if ((!p1.lastPuckHit || now - p1.lastPuckHit > 100) && (!p2.lastPuckHit || now - p2.lastPuckHit > 100)) {
-              playBallClickSound();
-              p1.lastPuckHit = now;
-              p2.lastPuckHit = now;
-            }
-          }
-        }
-      }
-
-      pucks = pucks.filter(p => {
-        const outsideLeft = p.px < 0;
-        const outsideRight = p.px > canvas.width;
-        const outsideTop = p.py < 0;
-        const outsideBottom = p.py > canvas.height;
-        return !(outsideLeft || outsideRight || outsideTop || outsideBottom);
-      });
-
-      if (gameEndedSignalReceived && !isAnyPuckMoving && !winnerCalculated) {
-        winnerCalculated = true;
-        calculateFinalScores();
-      }
-    }
-
-    function draw() {
-      ctx.fillStyle = '#d4a373';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const zoneH = canvas.height * 0.08;
-      const zones = [
-        { name: '4 Poeng', color: 'rgba(230, 126, 34, 0.4)', y: 0 },
-        { name: '3 Poeng', color: 'rgba(241, 196, 15, 0.4)', y: zoneH },
-        { name: '2 Poeng', color: 'rgba(46, 204, 113, 0.4)', y: zoneH * 2 },
-        { name: '1 Poeng', color: 'rgba(52, 152, 219, 0.4)', y: zoneH * 3 }
-      ];
-
-      zones.forEach(z => {
-        ctx.fillStyle = z.color;
-        ctx.fillRect(0, z.y, canvas.width, zoneH);
-        ctx.strokeStyle = '#5c3a21';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(0, z.y, canvas.width, zoneH);
-        ctx.fillStyle = '#1e1e1e';
-        ctx.font = 'bold 16px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(z.name, canvas.width / 2, z.y + zoneH / 1.5);
-      });
-
-      // TEGN DUSED NEDBILDET AV HINDRINGER (UTEN TEKST)
-      boardConfig.obstacles.forEach(obs => {
-        const ox = (obs.x / 100) * canvas.width;
-        const oy = (obs.y / 100) * canvas.height;
-
-        ctx.beginPath();
-        ctx.arc(ox, oy, obs.radius, 0, Math.PI * 2);
-
-        if (isEditMode) {
-          ctx.fillStyle = (obs === hoveredObstacle) ? 'rgba(241, 196, 15, 0.35)' : 'rgba(255, 255, 255, 0.25)';
-          ctx.strokeStyle = (obs === hoveredObstacle) ? '#f39c12' : 'rgba(255, 255, 255, 0.6)';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([5, 5]);
-        } else {
-          // Dus og nøytral sirkel uten tekst
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([]);
-        }
-
-        ctx.fill();
-        ctx.stroke();
-        ctx.setLineDash([]);
-      });
-
-      pucks.forEach(p => {
-        ctx.beginPath();
-        ctx.arc(p.px, p.py, PUCK_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = p.color || '#e74c3c';
-        ctx.fill();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#fff';
-        ctx.stroke();
-      });
-
-      updatePhysics();
-      requestAnimationFrame(draw);
-    }
-
-    resizeCanvas();
-    requestAnimationFrame(draw);
-  </script>
+  <script src="/board.js"></script>
 </body>
 </html>
